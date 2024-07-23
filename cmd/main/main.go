@@ -21,7 +21,7 @@ func main() {
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
 	u := tgb.NewUpdate(0)
-	u.Timeout = 600
+	u.Timeout = 601
 
 	updates := bot.GetUpdatesChan(u)
 	for update := range updates {
