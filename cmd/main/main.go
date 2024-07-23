@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"ratinger/internal/poly"
 
 	tgb "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
@@ -25,7 +26,11 @@ func main() {
 	updates := bot.GetUpdatesChan(u)
 	for update := range updates {
 		if update.Message != nil {
-			msg := tgb.NewMessage(update.Message.Chat.ID, update.Message.Text)
+			var ms string
+			for _, v := range poly.Check("199-663-358 47") {
+				ms += v
+			}
+			msg := tgb.NewMessage(update.Message.Chat.ID, ms)
 			msg.ReplyToMessageID = update.Message.MessageID
 			bot.Send(msg)
 		}
