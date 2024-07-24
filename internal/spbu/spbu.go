@@ -10,6 +10,10 @@ import (
 	"sync"
 )
 
+type Data struct {
+	List []Abits
+}
+
 type Abits struct {
 	Code        string `json:"user_code"`
 	OrderNumber int    `json:"order_number"`
@@ -63,7 +67,7 @@ func Check(snils string) []string {
 }
 
 func formList(url string) []Abits {
-	data := make([]Abits, 0, 1000)
+	var data Data
 	res, err := http.Get(url)
 	if err != nil {
 		log.Fatalf("error sending a request: %v", err)
@@ -77,5 +81,5 @@ func formList(url string) []Abits {
 	if err != nil {
 		log.Fatalf("error unmarshalling: %v", err)
 	}
-	return data
+	return data.List
 }
