@@ -35,15 +35,26 @@ var napravs = map[string]string{
 	"Информационные Системы и Технологии":             "https://lists.priem.etu.ru/public/list/77795752-fee7-42e5-9ff2-f93f9f2b8b95",
 }
 
+type parsedData struct {
+	data map[string][]Abits
+	cap  map[string]int
+	mu   sync.Mutex
+}
+
 func Check(snils string) []string {
 	response := make([]string, 0, 5)
 	var wg sync.WaitGroup
-	data := make(map[string][]Abits)
-	rooms := make(map[string]int)
+	data := parsedData{
+		data: make(map[string][]Abits),
+		cap:  make(map[string]int),
+	}
 	for k, v := range napravs {
 		wg.Add(1)
 		go func() {
-			data[k], rooms[k] = formList(v)
+			tmp, cap := formList(v)
+			data.mu.Lock()
+			data.data[k], data.cap[k] = tmp, cap
+			data.mu.Unlock()
 			wg.Done()
 		}()
 	}
@@ -53,9 +64,9 @@ func Check(snils string) []string {
 	var uniqueCounter int
 	for k := range napravs {
 		var origs int
-		for i, v := range data[k] {
+		for i, v := range data.data[k] {
 			if v.Code == snils {
-				response = append(response, fmt.Sprintf("%s: %d out of %d, before me %d originals // total %d mest\n", k, i+1, len(data[k]), origs, rooms[k]))
+				response = append(response, fmt.Sprintf("%s (всего %d мест):\nТы %d из %d, выше тебя %d оригиналов\n", k, data.cap[k], i+1, len(data.data[k]), origs))
 				break
 			}
 			if v.HasOriginal {
@@ -68,7 +79,11 @@ func Check(snils string) []string {
 		}
 	}
 
-	response = append(response, "      Unique abits with original above me: "+strconv.Itoa(uniqueCounter)+"\n")
+	if len(response) != 0 {
+		response = append(response, "Количество уникальных* аттестатов: "+strconv.Itoa(uniqueCounter)+"\n")
+	} else {
+		response = append(response, fmt.Sprintf("Не нашел Тебя в списках.\n\nПроверь, верен ли введенный СНИЛС (%v).\n\n*возможна также проблема в сайте вуза, тогда остается только ждать*", snils))
+	}
 
 	return response
 }

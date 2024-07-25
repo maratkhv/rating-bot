@@ -12,12 +12,18 @@ import (
 	"github.com/joho/godotenv"
 )
 
-var usersData = make(map[int64]string)
+var usersData = auth.InitUserData()
 
-// add autoremove from waiters if not responding for too long
-var authWaiters = auth.NewWaiter()
+var numericKeyboard = tgbotapi.NewReplyKeyboard(
+	tgbotapi.NewKeyboardButtonRow(
+		tgbotapi.NewKeyboardButton("ЛЭТИ"),
+		tgbotapi.NewKeyboardButton("СПБПУ"),
+		tgbotapi.NewKeyboardButton("СПБГУ"),
+	),
+)
 
 func main() {
+	defer usersData.Db.Close()
 	godotenv.Load()
 	token := os.Getenv("TOKEN")
 	bot, err := tgbotapi.NewBotAPI(token)
@@ -37,11 +43,23 @@ func main() {
 
 			id := update.Message.Chat.ID
 
-			if _, ok := authWaiters.List[id]; ok && auth.IsValidSnils(update.Message.Text) {
-				delete(authWaiters.List, id)
-				usersData[id] = update.Message.Text
-				msg := tgbotapi.NewMessage(id, "СНИЛС успешно установлен\nЧтобы сменить снилс используйте комманду /restart")
-				bot.Send(msg)
+			snils := usersData.GetSnils(id)
+
+			if update.Message.IsCommand() {
+				handleCommand(update.Message, bot)
+				continue
+			}
+
+			if snils == "" {
+				if auth.IsValidSnils(update.Message.Text) {
+					usersData.AddUser(id, update.Message.Text)
+					msg := tgbotapi.NewMessage(id, "СНИЛС успешно установлен\nТеперь выбери интересующий тебя вуз\n\nЧтобы сменить снилс введите команду /reset")
+					msg.ReplyMarkup = numericKeyboard
+					bot.Send(msg)
+				} else {
+					msg := tgbotapi.NewMessage(id, "Сначала введите ваш СНИЛС")
+					bot.Send(msg)
+				}
 				continue
 			}
 
@@ -53,23 +71,13 @@ func main() {
 				handl = poly.Check
 			case "СПБГУ":
 				handl = spbu.Check
-			case "/start":
-				sendHello(id, bot)
-				continue
 			default:
-				msg := tgbotapi.NewMessage(id, "?")
-				bot.Send(msg)
+				unknownCommand(update.Message, bot)
 				continue
 			}
 
-			snils, ok := usersData[id]
-
-			if !ok {
-				msg := tgbotapi.NewMessage(id, "Сначала введите ваш СНИЛС")
-				bot.Send(msg)
-				continue
-			}
-
+			msg := tgbotapi.NewMessage(id, "Собираю информацию...")
+			bot.Send(msg)
 			for _, v := range handl(snils) {
 				msg := tgbotapi.NewMessage(id, v)
 				bot.Send(msg)
@@ -84,10 +92,28 @@ func sendHello(chatID int64, bot *tgbotapi.BotAPI) {
 	bot.Send(msg)
 	msg.Text = "Для работы бота необходим Твой СНИЛС. Введи его в формате 555-666-777 89"
 	bot.Send(msg)
-	authWaiters.List[chatID] = struct{}{}
 }
 
-func restart(chatID int64, bot *tgbotapi.BotAPI) {
-	msg := tgbotapi.NewMessage(chatID, "В разработке")
+func reset(chatID int64, bot *tgbotapi.BotAPI) {
+	usersData.DeleteUser(chatID)
+	msg := tgbotapi.NewMessage(chatID, "Введите новый СНИЛС")
+	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
 	bot.Send(msg)
+}
+
+func handleCommand(msg *tgbotapi.Message, bot *tgbotapi.BotAPI) {
+	switch msg.Command() {
+	case "start":
+		sendHello(msg.Chat.ID, bot)
+	case "reset":
+		reset(msg.Chat.ID, bot)
+	default:
+		unknownCommand(msg, bot)
+	}
+}
+
+func unknownCommand(msg *tgbotapi.Message, bot *tgbotapi.BotAPI) {
+	response := tgbotapi.NewMessage(msg.Chat.ID, "?")
+	response.ReplyToMessageID = msg.MessageID
+	bot.Send(response)
 }

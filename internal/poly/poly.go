@@ -30,15 +30,26 @@ var napravs = map[string]string{
 	"Информационныые Системы и Технологии":              "https://enroll.spbstu.ru/applications-manager/api/v1/admission-list/form-rating?applicationEducationLevel=BACHELOR&directionEducationFormId=2&directionId=2156",
 }
 
+type parsedData struct {
+	data map[string][]Abits
+	cap  map[string]int
+	mu   sync.Mutex
+}
+
 func Check(snils string) []string {
-	data := make(map[string][]Abits)
+	data := parsedData{
+		data: make(map[string][]Abits),
+		cap:  make(map[string]int),
+	}
 	var wg sync.WaitGroup
-	dirCap := make(map[string]int, 5)
 	response := make([]string, 0, 6)
 	for k, v := range napravs {
 		wg.Add(1)
 		go func() {
-			data[k], dirCap[k] = formList(v)
+			tmp, cap := formList(v)
+			data.mu.Lock()
+			data.data[k], data.cap[k] = tmp, cap
+			data.mu.Unlock()
 			wg.Done()
 		}()
 	}
@@ -48,9 +59,9 @@ func Check(snils string) []string {
 	var uniqueCounter int
 	for k := range napravs {
 		var origs int
-		for i, v := range data[k] {
+		for i, v := range data.data[k] {
 			if v.UserSnils == snils {
-				response = append(response, fmt.Sprintf("%s: %d out of %d, before me %d originals // %d mest in total\n", k, i+1, len(data[k]), origs, dirCap[k]))
+				response = append(response, fmt.Sprintf("%s (всего %d мест):\nТы %d из %d, выше тебя %d оригиналов\n", k, data.cap[k], i+1, len(data.data[k]), origs))
 				break
 			}
 			if v.HasOriginalDocuments {
@@ -63,7 +74,11 @@ func Check(snils string) []string {
 		}
 	}
 
-	response = append(response, "      Unique abits with original above me: "+strconv.Itoa(uniqueCounter)+"\n")
+	if len(response) != 0 {
+		response = append(response, "Количество уникальных* аттестатов: "+strconv.Itoa(uniqueCounter)+"\n")
+	} else {
+		response = append(response, fmt.Sprintf("Не нашел Тебя в списках.\n\nПроверь, верен ли введенный СНИЛС (%v).\n\n*возможна также проблема в сайте вуза, тогда остается только ждать*", snils))
+	}
 
 	return response
 
