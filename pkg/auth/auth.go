@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const connString = "postgres://postgres:42136620@localhost:5432/ratingerdb"
+const connString = "postgresql://postgres:42136620@localhost:5432/ratingerdb"
 
 type UserData struct {
 	Db *pgxpool.Pool

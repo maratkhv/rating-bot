@@ -1,13 +1,18 @@
 package poly
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"sync"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/joho/godotenv"
 )
 
 type Data struct {
@@ -37,6 +42,14 @@ type parsedData struct {
 }
 
 func Check(snils string) []string {
+	godotenv.Load()
+	var PSWD = os.Getenv("PSWD")
+
+	var connString = "postgresql://myneondb_owner:" + PSWD + "@ep-shiny-sun-a2swl5c2.eu-central-1.aws.neon.tech/myneondb?sslmode=require"
+	_, err := pgx.Connect(context.Background(), connString)
+	if err != nil {
+		log.Fatal(err)
+	}
 	data := parsedData{
 		data: make(map[string][]Abits),
 		cap:  make(map[string]int),
