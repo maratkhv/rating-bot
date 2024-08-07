@@ -3,43 +3,53 @@ package auth
 import (
 	"context"
 	"log"
+	"os"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
+	_ "github.com/joho/godotenv/autoload"
 )
 
-const connString = "postgresql://postgres:42136620@localhost:5432/ratingerdb"
+var PSWD = os.Getenv("PSWD")
 
-type UserData struct {
-	Db *pgxpool.Pool
-}
+var connString = "postgresql://myneondb_owner:" + PSWD + "@ep-shiny-sun-a2swl5c2.eu-central-1.aws.neon.tech/myneondb?sslmode=require"
 
-func (u *UserData) DeleteUser(id int64) error {
-	_, err := u.Db.Exec(context.Background(), "delete from users where id=$1", id)
+func DeleteUser(id int64) error {
+	conn, err := pgx.Connect(context.Background(), connString)
+	if err != nil {
+		log.Fatalf("error connecting to db: %v", err)
+	}
+	_, err = conn.Exec(context.Background(), "delete from users where id=$1", id)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (u *UserData) AddUser(id int64, snils string) {
-	_, err := u.Db.Query(context.Background(), "insert into users(id, snils) values($1,$2)", id, snils)
+func AddUser(id int64, snils string) {
+	conn, err := pgx.Connect(context.Background(), connString)
+	if err != nil {
+		log.Fatalf("error connecting to db: %v", err)
+	}
+	_, err = conn.Query(context.Background(), "insert into users(id, snils) values($1,$2)", id, snils)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
 }
 
-func (u *UserData) GetSnils(id int64) string {
-	row, err := u.Db.Query(context.Background(), "select snils from users where id=$1", id)
+func GetSnils(id int64) string {
+	conn, err := pgx.Connect(context.Background(), connString)
+	if err != nil {
+		log.Fatalf("error connecting to db: %v", err)
+	}
+	row, err := conn.Query(context.Background(), "select snils from users where id=$1", id)
 	if err != nil {
 		log.Fatalf("query err: %v", err)
 	}
 	defer row.Close()
 
-	var (
-		snils string
-	)
+	var snils string
 
 	if row.Next() {
 		err = row.Scan(&snils)
@@ -72,12 +82,4 @@ func IsValidSnils(s string) bool {
 		return true
 	}
 	return false
-}
-
-func InitUserData() *UserData {
-	conn, err := pgxpool.New(context.Background(), connString)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	return &UserData{Db: conn}
 }

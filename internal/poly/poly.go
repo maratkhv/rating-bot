@@ -27,41 +27,71 @@ type Abits struct {
 	Priority             int
 }
 
-var napravs = map[string]string{
-	"Математика и Компьютерные Науки":                   "https://enroll.spbstu.ru/applications-manager/api/v1/admission-list/form-rating?applicationEducationLevel=BACHELOR&directionEducationFormId=2&directionId=2193",
-	"Математическое Обеспечение и Администрирование КС": "https://enroll.spbstu.ru/applications-manager/api/v1/admission-list/form-rating?applicationEducationLevel=BACHELOR&directionEducationFormId=2&directionId=2199",
-	"Прикладная Информатика":                            "https://enroll.spbstu.ru/applications-manager/api/v1/admission-list/form-rating?applicationEducationLevel=BACHELOR&directionEducationFormId=2&directionId=2281",
-	"Программная Инженерия":                             "https://enroll.spbstu.ru/applications-manager/api/v1/admission-list/form-rating?applicationEducationLevel=BACHELOR&directionEducationFormId=2&directionId=2321",
-	"Информационныые Системы и Технологии":              "https://enroll.spbstu.ru/applications-manager/api/v1/admission-list/form-rating?applicationEducationLevel=BACHELOR&directionEducationFormId=2&directionId=2156",
-}
+var apiLink = "https://enroll.spbstu.ru/applications-manager/api/v1/admission-list/form-rating?applicationEducationLevel=BACHELOR&directionEducationFormId=2&directionId="
 
 type parsedData struct {
-	data map[string][]Abits
-	cap  map[string]int
+	data map[int][]Abits
+	cap  map[int]int
 	mu   sync.Mutex
+}
+
+type naprav struct {
+	name string
+	url  string
+}
+
+func findNapravs(payment, form string) *map[int]naprav {
+	napravs := make(map[int]naprav)
+	godotenv.Load()
+	var PSWD = os.Getenv("PSWD")
+	var connString = "postgresql://myneondb_owner:" + PSWD + "@ep-shiny-sun-a2swl5c2.eu-central-1.aws.neon.tech/myneondb?sslmode=require"
+	conn, err := pgx.Connect(context.Background(), connString)
+	if err != nil {
+		log.Fatal(err)
+	}
+	rows, err := conn.Query(context.Background(), "select id, name from napravs where payment=$1 and form=$2", payment, form)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for rows.Next() {
+		var id int
+		var name string
+		err = rows.Scan(&id, &name)
+		if err != nil {
+			log.Fatalf("scan err: %v", err)
+		}
+		napravs[id] = naprav{
+			name: name,
+			url:  apiLink + strconv.Itoa(id),
+		}
+	}
+
+	return &napravs
 }
 
 func Check(snils string) []string {
 	godotenv.Load()
 	var PSWD = os.Getenv("PSWD")
-
 	var connString = "postgresql://myneondb_owner:" + PSWD + "@ep-shiny-sun-a2swl5c2.eu-central-1.aws.neon.tech/myneondb?sslmode=require"
 	_, err := pgx.Connect(context.Background(), connString)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	napravs := *findNapravs("Бюджетная основа", "Очная")
+
 	data := parsedData{
-		data: make(map[string][]Abits),
-		cap:  make(map[string]int),
+		data: make(map[int][]Abits),
+		cap:  make(map[int]int),
 	}
 	var wg sync.WaitGroup
-	response := make([]string, 0, 6)
-	for k, v := range napravs {
+	response := make([]string, 0)
+	for id, n := range napravs {
 		wg.Add(1)
 		go func() {
-			tmp, cap := formList(v)
+			tmp, cap := formList(n.url)
 			data.mu.Lock()
-			data.data[k], data.cap[k] = tmp, cap
+			data.data[id], data.cap[id] = tmp, cap
 			data.mu.Unlock()
 			wg.Done()
 		}()
@@ -70,11 +100,11 @@ func Check(snils string) []string {
 
 	unique := make(map[string]struct{})
 	var uniqueCounter int
-	for k := range napravs {
+	for id := range napravs {
 		var origs int
-		for i, v := range data.data[k] {
+		for i, v := range data.data[id] {
 			if v.UserSnils == snils {
-				response = append(response, fmt.Sprintf("%s (всего %d мест):\nТы %d из %d, выше тебя %d оригиналов\n", k, data.cap[k], i+1, len(data.data[k]), origs))
+				response = append(response, fmt.Sprintf("%d (всего %d мест):\nТы %d из %d, выше тебя %d оригиналов\n", id, data.cap[id], i+1, len(data.data[id]), origs))
 				break
 			}
 			if v.HasOriginalDocuments {
@@ -121,5 +151,6 @@ func formList(url string) ([]Abits, int) {
 	if err != nil {
 		log.Fatalf("error unmarshalling: %v", err)
 	}
+
 	return data.List, data.DirectionCapacity
 }

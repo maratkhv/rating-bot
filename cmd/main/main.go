@@ -12,8 +12,6 @@ import (
 	"github.com/joho/godotenv"
 )
 
-var usersData = auth.InitUserData()
-
 var numericKeyboard = tgbotapi.NewReplyKeyboard(
 	tgbotapi.NewKeyboardButtonRow(
 		tgbotapi.NewKeyboardButton("ЛЭТИ"),
@@ -23,7 +21,6 @@ var numericKeyboard = tgbotapi.NewReplyKeyboard(
 )
 
 func main() {
-	defer usersData.Db.Close()
 	godotenv.Load()
 	token := os.Getenv("TOKEN")
 	bot, err := tgbotapi.NewBotAPI(token)
@@ -43,7 +40,7 @@ func main() {
 
 			id := update.Message.Chat.ID
 
-			snils := usersData.GetSnils(id)
+			snils := auth.GetSnils(id)
 
 			if update.Message.IsCommand() {
 				handleCommand(update.Message, bot)
@@ -52,7 +49,7 @@ func main() {
 
 			if snils == "" {
 				if auth.IsValidSnils(update.Message.Text) {
-					usersData.AddUser(id, update.Message.Text)
+					auth.AddUser(id, update.Message.Text)
 					msg := tgbotapi.NewMessage(id, "СНИЛС успешно установлен\nТеперь выбери интересующий тебя вуз\n\nЧтобы сменить снилс введите команду /reset")
 					msg.ReplyMarkup = numericKeyboard
 					bot.Send(msg)
@@ -95,7 +92,7 @@ func sendHello(chatID int64, bot *tgbotapi.BotAPI) {
 }
 
 func reset(chatID int64, bot *tgbotapi.BotAPI) {
-	usersData.DeleteUser(chatID)
+	auth.DeleteUser(chatID)
 	msg := tgbotapi.NewMessage(chatID, "Введите новый СНИЛС")
 	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
 	bot.Send(msg)
