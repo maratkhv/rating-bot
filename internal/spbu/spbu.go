@@ -10,6 +10,10 @@ import (
 	"sync"
 )
 
+var bachelorApiLink = "https://application.spbu.ru/enrollee_lists/lists?id="
+var aspApiLink = "https://cabinet.spbu.ru/Lists/ASP_EntryLists/"
+var magApiLink = "https://cabinet.spbu.ru/Lists/Mag_EntryLists/"
+
 type Data struct {
 	List []Abits
 }
@@ -22,13 +26,6 @@ type Abits struct {
 	Priority    int    `json:"priority_number"`
 }
 
-var napravs = map[string]string{
-	"ПМиИ Фундаментальная информатика и пограммирование": "https://application.spbu.ru/enrollee_lists/lists?id=17",
-	"ПМиИ Современное программирование":                  "https://application.spbu.ru/enrollee_lists/lists?id=6",
-	"МиКН Науки о данных":                                "https://application.spbu.ru/enrollee_lists/lists?id=27",
-	"Математическое Обеспечение и Администрирование КС":  "https://application.spbu.ru/enrollee_lists/lists?id=49",
-}
-
 type parsedData struct {
 	data map[string][]Abits
 	mu   sync.Mutex
@@ -39,7 +36,7 @@ func Check(snils string) []string {
 		data: make(map[string][]Abits),
 	}
 	var wg sync.WaitGroup
-	response := make([]string, 0, 5)
+	response := make([]string, 0)
 	for k, v := range napravs {
 		wg.Add(1)
 		go func() {

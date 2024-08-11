@@ -7,12 +7,10 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
+	"ratinger/pkg/auth"
+	"ratinger/pkg/db"
 	"strconv"
 	"sync"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/joho/godotenv"
 )
 
 type Data struct {
@@ -29,6 +27,7 @@ type Abits struct {
 
 var apiLink = "https://enroll.spbstu.ru/applications-manager/api/v1/admission-list/form-rating?applicationEducationLevel=BACHELOR&directionEducationFormId=2&directionId="
 
+// TODO: i think i can just use []Structs with len=len(napravs)
 type parsedData struct {
 	data map[int][]Abits
 	cap  map[int]int
@@ -40,45 +39,10 @@ type naprav struct {
 	url  string
 }
 
-func findNapravs(payment, form string) *map[int]naprav {
-	napravs := make(map[int]naprav)
-	godotenv.Load()
-	var PSWD = os.Getenv("PSWD")
-	var connString = "postgresql://myneondb_owner:" + PSWD + "@ep-shiny-sun-a2swl5c2.eu-central-1.aws.neon.tech/myneondb?sslmode=require"
-	conn, err := pgx.Connect(context.Background(), connString)
-	if err != nil {
-		log.Fatal(err)
-	}
-	rows, err := conn.Query(context.Background(), "select id, name from napravs where payment=$1 and form=$2", payment, form)
-	if err != nil {
-		log.Fatal(err)
-	}
-	for rows.Next() {
-		var id int
-		var name string
-		err = rows.Scan(&id, &name)
-		if err != nil {
-			log.Fatalf("scan err: %v", err)
-		}
-		napravs[id] = naprav{
-			name: name,
-			url:  apiLink + strconv.Itoa(id),
-		}
-	}
-
-	return &napravs
-}
-
-func Check(snils string) []string {
-	godotenv.Load()
-	var PSWD = os.Getenv("PSWD")
-	var connString = "postgresql://myneondb_owner:" + PSWD + "@ep-shiny-sun-a2swl5c2.eu-central-1.aws.neon.tech/myneondb?sslmode=require"
-	_, err := pgx.Connect(context.Background(), connString)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	napravs := *findNapravs("Бюджетная основа", "Очная")
+// TODO: needs to be rewritten but im too lazy
+// TODO: use workers / semphore to avoid using 100s of goroutines
+func Check(u *auth.User) []string {
+	napravs := retrieveNapravs(u)
 
 	data := parsedData{
 		data: make(map[int][]Abits),
@@ -100,27 +64,40 @@ func Check(snils string) []string {
 
 	unique := make(map[string]struct{})
 	var uniqueCounter int
+	var abitNapravs []int
 	for id := range napravs {
-		var origs int
+		var origs, uc int
 		for i, v := range data.data[id] {
-			if v.UserSnils == snils {
-				response = append(response, fmt.Sprintf("%d (всего %d мест):\nТы %d из %d, выше тебя %d оригиналов\n", id, data.cap[id], i+1, len(data.data[id]), origs))
+			if v.UserSnils == u.Snils {
+				response = append(response, fmt.Sprintf("%s (всего %d мест):\nТы %d из %d, выше тебя %d оригиналов\n", napravs[id].name, data.cap[id], i+1, len(data.data[id]), origs))
+				uniqueCounter += uc
+				abitNapravs = append(abitNapravs, id)
 				break
 			}
 			if v.HasOriginalDocuments {
 				origs++
 			}
 			if _, ok := unique[v.UserSnils]; !ok && v.HasOriginalDocuments {
-				uniqueCounter++
+				uc++
 				unique[v.UserSnils] = struct{}{}
 			}
 		}
 	}
 
+	if len(abitNapravs) != 0 && u.Spbstu == nil {
+		conn := db.NeonConnect()
+		defer conn.Close(context.Background())
+		_, err := conn.Exec(context.Background(), "update users set spbstu=$1 where snils=$2", abitNapravs, u.Snils)
+		if err != nil {
+			log.Fatal(err)
+		}
+		u.Spbstu = abitNapravs
+	}
+
 	if len(response) != 0 {
 		response = append(response, "Количество уникальных* аттестатов: "+strconv.Itoa(uniqueCounter)+"\n")
 	} else {
-		response = append(response, fmt.Sprintf("Не нашел Тебя в списках.\n\nПроверь, верен ли введенный СНИЛС (%v).\n\n*возможна также проблема в сайте вуза, тогда остается только ждать*", snils))
+		response = append(response, fmt.Sprintf("Не нашел Тебя в списках.\n\nПроверь, верен ли введенный СНИЛС (%v).\n\n*возможна также проблема в сайте вуза, тогда остается только ждать*", u.Snils))
 	}
 
 	return response
@@ -153,4 +130,65 @@ func formList(url string) ([]Abits, int) {
 	}
 
 	return data.List, data.DirectionCapacity
+}
+
+func retrieveNapravs(u *auth.User) map[int]naprav {
+	napravs := make(map[int]naprav)
+	conn := db.NeonConnect()
+	defer conn.Close(context.Background())
+	if u.Spbstu != nil {
+		rows, err := conn.Query(context.Background(), "select id, name from spbstu where id = any($1)", u.Spbstu)
+		if err != nil {
+			log.Fatalf("failed getting spbstu that already known: %v", err)
+		}
+		for rows.Next() {
+			var (
+				id   int
+				name string
+			)
+			rows.Scan(&id, &name)
+			napravs[id] = naprav{
+				name: name,
+				url:  apiLink + strconv.Itoa(id),
+			}
+		}
+		return napravs
+	}
+
+	p, f, el := parseAbitConstraints(u)
+	fmt.Println(p, f, el)
+	rows, err := conn.Query(context.Background(), "select id, name from spbstu where payment = any($1) and form = any($2) and edu_level=any($3)", p, f, el)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for rows.Next() {
+		var id int
+		var name string
+		err = rows.Scan(&id, &name)
+		if err != nil {
+			log.Fatalf("scan err: %v", err)
+		}
+		napravs[id] = naprav{
+			name: name,
+			url:  apiLink + strconv.Itoa(id),
+		}
+	}
+	fmt.Println(napravs)
+	return napravs
+}
+
+// prolly should just make data in tables fit defaults TODO? also add links in tables
+func parseAbitConstraints(u *auth.User) ([]string, []string, []string) {
+	p := make([]string, 0, len(u.Payments))
+	for _, v := range u.Payments {
+		switch v {
+		case "Бюджет":
+			p = append(p, "Бюджетная основа")
+		case "Контракт":
+			p = append(p, "Контракт")
+		case "Целевое":
+			p = append(p, "Целевой прием")
+		}
+	}
+	return p, u.Forms, u.EduLevel
 }

@@ -1,11 +1,15 @@
 package main
 
+// TODO: this whole package needs to be rewritten but after spbu i guess
+
 import (
 	"log"
 	"os"
-	"ratinger/internal/leti"
+
+	// "ratinger/internal/leti"
+
 	"ratinger/internal/poly"
-	"ratinger/internal/spbu"
+	// "ratinger/internal/spbu"
 	"ratinger/pkg/auth"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -37,52 +41,48 @@ func main() {
 	updates := bot.GetUpdatesChan(u)
 	for update := range updates {
 		if update.Message != nil {
+			message := update.Message.Text
+			user := auth.GetUserData(update.Message.Chat.ID)
 
-			id := update.Message.Chat.ID
-
-			snils := auth.GetSnils(id)
+			if user.AuthStatus != auth.AUTHED {
+				e := user.AddInfo(message)
+				if e != nil {
+					msg := tgbotapi.NewMessage(user.Id, e.Error())
+					bot.Send(msg)
+				}
+				continue
+			}
 
 			if update.Message.IsCommand() {
 				handleCommand(update.Message, bot)
 				continue
 			}
 
-			if snils == "" {
-				if auth.IsValidSnils(update.Message.Text) {
-					auth.AddUser(id, update.Message.Text)
-					msg := tgbotapi.NewMessage(id, "СНИЛС успешно установлен\nТеперь выбери интересующий тебя вуз\n\nЧтобы сменить снилс введите команду /reset")
-					msg.ReplyMarkup = numericKeyboard
-					bot.Send(msg)
-				} else {
-					msg := tgbotapi.NewMessage(id, "Сначала введите ваш СНИЛС")
-					bot.Send(msg)
-				}
-				continue
-			}
-
-			var handl func(string) []string
+			var handl func(*auth.User) []string
 			switch update.Message.Text {
 			case "ЛЭТИ":
-				handl = leti.Check
+				// handl = leti.Check
 			case "СПБПУ":
 				handl = poly.Check
 			case "СПБГУ":
-				handl = spbu.Check
+				// handl = spbu.Check
 			default:
 				unknownCommand(update.Message, bot)
 				continue
 			}
 
-			msg := tgbotapi.NewMessage(id, "Собираю информацию...")
+			msg := tgbotapi.NewMessage(user.Id, "Собираю информацию...")
 			bot.Send(msg)
-			for _, v := range handl(snils) {
-				msg := tgbotapi.NewMessage(id, v)
+			for _, v := range handl(user) {
+				msg := tgbotapi.NewMessage(user.Id, v)
 				bot.Send(msg)
 			}
 
 		}
 	}
 }
+
+// TODO: these should go to diff file i guess?
 
 func sendHello(chatID int64, bot *tgbotapi.BotAPI) {
 	msg := tgbotapi.NewMessage(chatID, "Привет!\nЭто бот поможет Тебе быстро найти себя в списках, а также покажет полезную информацию")
@@ -100,8 +100,6 @@ func reset(chatID int64, bot *tgbotapi.BotAPI) {
 
 func handleCommand(msg *tgbotapi.Message, bot *tgbotapi.BotAPI) {
 	switch msg.Command() {
-	case "start":
-		sendHello(msg.Chat.ID, bot)
 	case "reset":
 		reset(msg.Chat.ID, bot)
 	default:

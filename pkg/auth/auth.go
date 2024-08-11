@@ -2,84 +2,133 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"log"
-	"os"
-	"strings"
-
-	"github.com/jackc/pgx/v5"
-	_ "github.com/joho/godotenv/autoload"
+	"ratinger/pkg/db"
 )
 
-var PSWD = os.Getenv("PSWD")
+const (
+	NOT_AUTHED           int8 = 0
+	AUTHED_WITH_SNILS    int8 = 1
+	AUTHED_WITH_PAYMENTS int8 = 2
+	AUTHED_WITH_FORMS    int8 = 3
+	AUTHED               int8 = 4
+)
 
-var connString = "postgresql://myneondb_owner:" + PSWD + "@ep-shiny-sun-a2swl5c2.eu-central-1.aws.neon.tech/myneondb?sslmode=require"
+var (
+	ErrExpectedSnils       error = errors.New("expected snils")
+	ErrExpectedFrom        error = errors.New("expected form or /done")
+	ErrExpectedPaymentFrom error = errors.New("expected payment form or /done")
+	ErrExpectedEduLevel    error = errors.New("expected edu level")
+)
 
+type User struct {
+	Id         int64
+	AuthStatus int8
+	Snils      string
+	Forms      []string
+	Payments   []string
+	//this is slice just because in GetUserData extracting null value to a &string leads to panic => might need doing smthing abt it
+	//but this could be even more convenient because "Специалитет" could be added with "Бакалавриат" to avoid adding it each time
+	EduLevel []string
+
+	//reserved
+	Vuzes []string
+
+	// below are ID napravs of vuzes
+	Spbstu []int
+	// reserved
+	Spbu []int
+}
+
+// TODO: redo this
 func DeleteUser(id int64) error {
-	conn, err := pgx.Connect(context.Background(), connString)
-	if err != nil {
-		log.Fatalf("error connecting to db: %v", err)
-	}
-	_, err = conn.Exec(context.Background(), "delete from users where id=$1", id)
+	conn := db.NeonConnect()
+	defer conn.Close(context.Background())
+	_, err := conn.Exec(context.Background(), "delete from users where id=$1", id)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func AddUser(id int64, snils string) {
-	conn, err := pgx.Connect(context.Background(), connString)
-	if err != nil {
-		log.Fatalf("error connecting to db: %v", err)
-	}
-	_, err = conn.Query(context.Background(), "insert into users(id, snils) values($1,$2)", id, snils)
-	if err != nil {
-		log.Fatalln(err)
+func (u *User) AddInfo(msg string) error {
+	db := db.NeonConnect()
+	defer db.Close(context.Background())
+	var query string
+	var err error
+
+	switch u.AuthStatus {
+
+	case NOT_AUTHED:
+		if !isValidSnils(msg) {
+			return ErrExpectedSnils
+		}
+		u.Snils, u.AuthStatus = msg, AUTHED_WITH_SNILS
+		query = "insert into users(id, snils, auth_status) values($1, $2, $3)"
+		_, err = db.Exec(context.Background(), query, u.Id, u.Snils, u.AuthStatus)
+
+	case AUTHED_WITH_SNILS:
+		if !isValidPayment(msg) {
+			if msg == "/done" && u.Payments != nil {
+				query = "update users set auth_status=$1 where id=$2"
+				u.AuthStatus = AUTHED_WITH_PAYMENTS
+				_, err = db.Exec(context.Background(), query, u.AuthStatus, u.Id)
+				return err
+			}
+			return ErrExpectedPaymentFrom
+		}
+		query = "update users set payments = $1 where id=$2"
+		u.Payments = append(u.Payments, msg)
+		_, err = db.Exec(context.Background(), query, u.Payments, u.Id)
+
+	case AUTHED_WITH_PAYMENTS:
+		if !isValidForm(msg) {
+			if msg == "/done" && u.Forms != nil {
+				query = "update users set auth_status=$1 where id=$2"
+				u.AuthStatus = AUTHED_WITH_FORMS
+				_, err = db.Exec(context.Background(), query, u.AuthStatus, u.Id)
+				return err
+			}
+			return ErrExpectedFrom
+		}
+		query = "update users set forms = $1 where id=$2"
+		u.Forms = append(u.Forms, msg)
+		_, err = db.Exec(context.Background(), query, u.Forms, u.Id)
+
+	case AUTHED_WITH_FORMS:
+		if !isValidEduLevel(msg) {
+			return ErrExpectedEduLevel
+		}
+		u.EduLevel, u.AuthStatus = []string{msg}, AUTHED
+		if u.EduLevel[0] == "Бакалавриат" {
+			u.EduLevel = append(u.EduLevel, "Специалитет")
+		}
+		query = "update users set edu_level = $1, auth_status = $2 where id=$3"
+		_, err = db.Exec(context.Background(), query, u.EduLevel, u.AuthStatus, u.Id)
 	}
 
+	return err
 }
 
-func GetSnils(id int64) string {
-	conn, err := pgx.Connect(context.Background(), connString)
-	if err != nil {
-		log.Fatalf("error connecting to db: %v", err)
-	}
-	row, err := conn.Query(context.Background(), "select snils from users where id=$1", id)
+func GetUserData(id int64) *User {
+	conn := db.NeonConnect()
+	defer conn.Close(context.Background())
+	row, err := conn.Query(context.Background(), "select snils, payments, forms, vuzes, spbstu, spbu, auth_status, edu_level from users where id=$1", id)
 	if err != nil {
 		log.Fatalf("query err: %v", err)
 	}
 	defer row.Close()
 
-	var snils string
+	var u User
+	u.Id = id
 
 	if row.Next() {
-		err = row.Scan(&snils)
+		err = row.Scan(&u.Snils, &u.Payments, &u.Forms, &u.Vuzes, &u.Spbstu, &u.Spbu, &u.AuthStatus, &u.EduLevel)
 		if err != nil {
 			log.Fatalf("scan err: %v", err)
 		}
-		return snils
+		return &u
 	}
-	return snils
-}
-
-func IsValidSnils(s string) bool {
-	if len(s) == 14 {
-		for i := range s {
-			switch i {
-			case 3, 7:
-				if s[i] != '-' {
-					return false
-				}
-			case 11:
-				if s[i] != ' ' {
-					return false
-				}
-			default:
-				if !strings.Contains("0123456789", string(s[i])) {
-					return false
-				}
-			}
-		}
-		return true
-	}
-	return false
+	return &u
 }
