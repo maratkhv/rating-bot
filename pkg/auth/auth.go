@@ -28,17 +28,14 @@ type User struct {
 	Snils      string
 	Forms      []string
 	Payments   []string
-	//this is slice just because in GetUserData extracting null value to a &string leads to panic => might need doing smthing abt it
-	//but this could be even more convenient because "Специалитет" could be added with "Бакалавриат" to avoid adding it each time
-	EduLevel []string
+	EduLevel   []string
 
-	//reserved
+	// reserved
 	Vuzes []string
 
-	// below are ID napravs of vuzes
+	// these are lists of naprav's IDs where user vas found
 	Spbstu []int
-	// reserved
-	Spbu []int
+	Spbu   []int
 }
 
 // TODO: redo this
