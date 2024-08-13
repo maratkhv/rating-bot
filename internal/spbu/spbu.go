@@ -40,7 +40,7 @@ type bachData struct {
 	List []abit
 }
 
-// TODO: also think of limiting goroutines
+// TODO: think of limiting goroutines
 func Check(u *auth.User) []string {
 	napravs := retrieveNapravs(u)
 	var wg sync.WaitGroup
@@ -55,12 +55,15 @@ func Check(u *auth.User) []string {
 
 	var response []string
 
+	var userNapravs []int
+
 	for _, n := range napravs {
 		var origs int
 		for _, abit := range n.list {
 			if abit.Snils == u.Snils {
 				s := fmt.Sprintf("%s: Ты %d из %d\nПеред тобой %d оригиналов", n.name, abit.OrderNumber, len(n.list), origs)
 				response = append(response, s)
+				userNapravs = append(userNapravs, n.id)
 				break
 			}
 			if abit.HasOriginal {
@@ -69,6 +72,16 @@ func Check(u *auth.User) []string {
 		}
 
 	}
+
+	if u.Spbu == nil {
+		u.Spbu = userNapravs
+		db := db.NeonConnect()
+		_, err := db.Exec(context.Background(), "insert into users(spbu) values($1)", u.Spbu)
+		if err != nil {
+			log.Fatalf("error connecting to db: %v", err)
+		}
+	}
+
 	if response == nil {
 		response = append(response, "Не нашел тебя в списках")
 	}
@@ -76,15 +89,14 @@ func Check(u *auth.User) []string {
 
 }
 
-// ugly but parsing html is such a pita
+// ugly parsing of html but i let it be
 func (n *naprav) getList() {
 	resp, err := http.Get(n.link)
 	if err != nil {
 		log.Fatalf("get request fail: %v", err)
 	}
 
-	switch n.eduLevel {
-	case "Бакалавриат":
+	if n.eduLevel == "Бакалавриат" {
 		r, err := io.ReadAll(resp.Body)
 		if err != nil {
 			log.Fatalf("error reading response: %v", err)
@@ -95,90 +107,91 @@ func (n *naprav) getList() {
 			log.Fatalf("error unmarshalling data: %v", err)
 		}
 		n.list = data.List
+		return
+	}
 
-	default:
-		doc, err := html.Parse(resp.Body)
-		if err != nil {
-			log.Fatalf("error parsing data (html): %v", err)
-		}
+	// if n.eduLevel == "Магистратура" || if n.eduLevel == "Аспирантура"
+	doc, err := html.Parse(resp.Body)
+	if err != nil {
+		log.Fatalf("error parsing data (html): %v", err)
+	}
 
-		ctx, cancel := context.WithCancel(context.Background())
-		var parser func(context.Context, *html.Node)
-		parser = func(ctx context.Context, nd *html.Node) {
-			if nd.Type == html.ElementNode && nd.Data == "tbody" {
-				for tr := nd.FirstChild; tr != nil; tr = tr.NextSibling {
-					if tr.Type == html.ElementNode && tr.Data == "tr" {
-						var a abit
-						var counter int
+	ctx, cancel := context.WithCancel(context.Background())
+	var parser func(context.Context, *html.Node)
+	parser = func(ctx context.Context, nd *html.Node) {
+		if nd.Type == html.ElementNode && nd.Data == "tbody" {
+			for tr := nd.FirstChild; tr != nil; tr = tr.NextSibling {
+				if tr.Type == html.ElementNode && tr.Data == "tr" {
+					var a abit
+					var counter int
 
-						for td := tr.FirstChild; td != nil; td = td.NextSibling {
-							if td.Type == html.ElementNode {
-								counter++
-								if td.FirstChild == nil {
+					for td := tr.FirstChild; td != nil; td = td.NextSibling {
+						if td.Type == html.ElementNode {
+							counter++
+							if td.FirstChild == nil {
+								continue
+							}
+							switch counter {
+							case 1:
+								num, err := strconv.Atoi(td.FirstChild.Data)
+								if err != nil {
+									log.Fatalf("error  1st atoi'ing %v: %v", td.Data, err)
+								}
+								a.OrderNumber = num
+							case 2:
+								a.Snils = td.FirstChild.Data
+							case 4:
+								d := td.FirstChild.Data
+								if len(d) == 0 {
 									continue
 								}
-								switch counter {
-								case 1:
+								if !strings.Contains(d, ",") {
 									num, err := strconv.Atoi(td.FirstChild.Data)
 									if err != nil {
-										log.Fatalf("error  1st atoi'ing %v: %v", td.Data, err)
+										log.Fatalf("error (get %v) atoi'ing %v: %v", n.link, td.Data, err)
 									}
-									a.OrderNumber = num
-								case 2:
-									a.Snils = td.FirstChild.Data
-								case 4:
-									d := td.FirstChild.Data
-									if len(d) == 0 {
-										continue
-									}
-									if !strings.Contains(d, ",") {
-										num, err := strconv.Atoi(td.FirstChild.Data)
-										if err != nil {
-											log.Fatalf("error (get %v) atoi'ing %v: %v", n.link, td.Data, err)
-										}
-										a.Priority = num
-									}
-									counter++
-									fallthrough
-								case 5:
-									d := td.FirstChild.Data
-									if len(d) < 4 {
-										continue
-									}
-									if d[0] == ' ' {
-										d = d[1:]
-									}
-									num, err := strconv.Atoi(d[:len(d)-3])
-									if err != nil {
-										log.Fatalf("error 3rd atoi'ing %v: %v", td.Data, err)
-									}
-									a.Score = num
-								case 7:
-									if td.FirstChild.Data == "Да" {
-										a.HasOriginal = true
-									}
+									a.Priority = num
+								}
+								counter++
+								fallthrough
+							case 5:
+								d := td.FirstChild.Data
+								if len(d) < 4 {
+									continue
+								}
+								if d[0] == ' ' {
+									d = d[1:]
+								}
+								num, err := strconv.Atoi(d[:len(d)-3])
+								if err != nil {
+									log.Fatalf("error 3rd atoi'ing %v: %v", td.Data, err)
+								}
+								a.Score = num
+							case 7:
+								if td.FirstChild.Data == "Да" {
+									a.HasOriginal = true
 								}
 							}
-
 						}
-						n.list = append(n.list, a)
-					}
 
-				}
-				cancel()
-			} else {
-				for c := nd.FirstChild; c != nil; c = c.NextSibling {
-					select {
-					case <-ctx.Done():
-						return
-					default:
-						parser(ctx, c)
 					}
+					n.list = append(n.list, a)
+				}
+
+			}
+			cancel()
+		} else {
+			for c := nd.FirstChild; c != nil; c = c.NextSibling {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					parser(ctx, c)
 				}
 			}
 		}
-		parser(ctx, doc)
 	}
+	parser(ctx, doc)
 
 }
 
