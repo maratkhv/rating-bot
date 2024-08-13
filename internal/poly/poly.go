@@ -156,7 +156,6 @@ func retrieveNapravs(u *auth.User) map[int]naprav {
 	}
 
 	p, f, el := parseAbitConstraints(u)
-	fmt.Println(p, f, el)
 	rows, err := conn.Query(context.Background(), "select id, name from spbstu where payment = any($1) and form = any($2) and edu_level=any($3)", p, f, el)
 	if err != nil {
 		log.Fatal(err)
@@ -173,7 +172,6 @@ func retrieveNapravs(u *auth.User) map[int]naprav {
 			url:  apiLink + strconv.Itoa(id),
 		}
 	}
-	fmt.Println(napravs)
 	return napravs
 }
 

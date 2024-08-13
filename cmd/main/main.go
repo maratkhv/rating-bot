@@ -9,7 +9,7 @@ import (
 	// "ratinger/internal/leti"
 
 	"ratinger/internal/poly"
-	// "ratinger/internal/spbu"
+	"ratinger/internal/spbu"
 	"ratinger/pkg/auth"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -65,7 +65,7 @@ func main() {
 			case "СПБПУ":
 				handl = poly.Check
 			case "СПБГУ":
-				// handl = spbu.Check
+				handl = spbu.Check
 			default:
 				unknownCommand(update.Message, bot)
 				continue
