@@ -40,15 +40,17 @@ type bachData struct {
 	List []abit
 }
 
-// TODO: think of limiting goroutines
 func Check(u *auth.User) []string {
 	napravs := retrieveNapravs(u)
 	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, 10)
 	for i := range napravs {
 		wg.Add(1)
+		semaphore <- struct{}{}
 		go func() {
 			defer wg.Done()
 			napravs[i].getList()
+			<-semaphore
 		}()
 	}
 	wg.Wait()
@@ -76,9 +78,9 @@ func Check(u *auth.User) []string {
 	if u.Spbu == nil {
 		u.Spbu = userNapravs
 		db := db.NeonConnect()
-		_, err := db.Exec(context.Background(), "insert into users(spbu) values($1)", u.Spbu)
+		_, err := db.Exec(context.Background(), "update users set spbu=$1 where id=$2", u.Spbu, u.Id)
 		if err != nil {
-			log.Fatalf("error connecting to db: %v", err)
+			log.Fatalf("db error: %v", err)
 		}
 	}
 
@@ -104,7 +106,7 @@ func (n *naprav) getList() {
 		var data bachData
 		err = json.Unmarshal(r, &data)
 		if err != nil {
-			log.Fatalf("error unmarshalling data: %v", err)
+			log.Fatalf("error unmarshalling data got by url: %s error: %v", n.link, err)
 		}
 		n.list = data.List
 		return
