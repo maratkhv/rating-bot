@@ -13,51 +13,37 @@ import (
 	"sync"
 )
 
-type Data struct {
-	List              []Abits
+type naprav struct {
+	id                int
+	name              string
 	DirectionCapacity int
+	List              []abit
+	payment           string
+	form              string
+	eduLevel          string
+	url               string
 }
 
-type Abits struct {
+type abit struct {
 	UserSnils            string
-	FullScore            int
+	FullScore            float32
 	HasOriginalDocuments bool
 	Priority             int
 }
 
-var apiLink = "https://enroll.spbstu.ru/applications-manager/api/v1/admission-list/form-rating?applicationEducationLevel=BACHELOR&directionEducationFormId=2&directionId="
-
-// TODO: i think i can just use []Structs with len=len(napravs)
-type parsedData struct {
-	data map[int][]Abits
-	cap  map[int]int
-	mu   sync.Mutex
-}
-
-type naprav struct {
-	name string
-	url  string
-}
-
-// TODO: needs to be rewritten but im too lazy
-// TODO: use workers / semphore to avoid using 100s of goroutines
 func Check(u *auth.User) []string {
 	napravs := retrieveNapravs(u)
-
-	data := parsedData{
-		data: make(map[int][]Abits),
-		cap:  make(map[int]int),
-	}
 	var wg sync.WaitGroup
 	response := make([]string, 0)
-	for id, n := range napravs {
+	semaphore := make(chan struct{}, 20)
+
+	for i := range napravs {
 		wg.Add(1)
+		semaphore <- struct{}{}
 		go func() {
-			tmp, cap := formList(n.url)
-			data.mu.Lock()
-			data.data[id], data.cap[id] = tmp, cap
-			data.mu.Unlock()
+			napravs[i].getList()
 			wg.Done()
+			<-semaphore
 		}()
 	}
 	wg.Wait()
@@ -65,13 +51,13 @@ func Check(u *auth.User) []string {
 	unique := make(map[string]struct{})
 	var uniqueCounter int
 	var abitNapravs []int
-	for id := range napravs {
+	for _, n := range napravs {
 		var origs, uc int
-		for i, v := range data.data[id] {
+		for i, v := range n.List {
 			if v.UserSnils == u.Snils {
-				response = append(response, fmt.Sprintf("%s (всего %d мест):\nТы %d из %d, выше тебя %d оригиналов\n", napravs[id].name, data.cap[id], i+1, len(data.data[id]), origs))
+				response = append(response, fmt.Sprintf("%s (всего %d мест):\nТы %d из %d, выше тебя %d оригиналов\n", n.name, n.DirectionCapacity, i+1, len(n.List), origs))
 				uniqueCounter += uc
-				abitNapravs = append(abitNapravs, id)
+				abitNapravs = append(abitNapravs, n.id)
 				break
 			}
 			if v.HasOriginalDocuments {
@@ -104,10 +90,9 @@ func Check(u *auth.User) []string {
 
 }
 
-func formList(url string) ([]Abits, int) {
-	var data Data
+func (n *naprav) getList() {
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", n.url, nil)
 	if err != nil {
 		log.Fatalf("error creating req: %v", err)
 	}
@@ -124,58 +109,42 @@ func formList(url string) ([]Abits, int) {
 		log.Fatalf("error reading: %v", err)
 	}
 
-	err = json.Unmarshal(r, &data)
+	err = json.Unmarshal(r, &n)
 	if err != nil {
 		log.Fatalf("error unmarshalling: %v", err)
 	}
-
-	return data.List, data.DirectionCapacity
 }
 
-func retrieveNapravs(u *auth.User) map[int]naprav {
-	napravs := make(map[int]naprav)
+func retrieveNapravs(u *auth.User) []naprav {
+	napravs := make([]naprav, 0, len(u.Spbstu))
 	conn := db.NeonConnect()
 	defer conn.Close(context.Background())
 	if u.Spbstu != nil {
-		rows, err := conn.Query(context.Background(), "select id, name from spbstu where id = any($1)", u.Spbstu)
+		rows, err := conn.Query(context.Background(), "select * from spbstu where id = any($1)", u.Spbstu)
 		if err != nil {
-			log.Fatalf("failed getting spbstu that already known: %v", err)
+			log.Fatalf("failed getting spbstu: %v", err)
 		}
 		for rows.Next() {
-			var (
-				id   int
-				name string
-			)
-			rows.Scan(&id, &name)
-			napravs[id] = naprav{
-				name: name,
-				url:  apiLink + strconv.Itoa(id),
-			}
+			var n naprav
+			rows.Scan(&n.id, &n.name, &n.payment, &n.form, &n.eduLevel, &n.url)
+			napravs = append(napravs, n)
 		}
 		return napravs
 	}
 
 	p, f, el := parseAbitConstraints(u)
-	rows, err := conn.Query(context.Background(), "select id, name from spbstu where payment = any($1) and form = any($2) and edu_level=any($3)", p, f, el)
+	rows, err := conn.Query(context.Background(), "select * from spbstu where payment = any($1) and form = any($2) and edu_level=any($3)", p, f, el)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed getting spbstu: %v", err)
 	}
 	for rows.Next() {
-		var id int
-		var name string
-		err = rows.Scan(&id, &name)
-		if err != nil {
-			log.Fatalf("scan err: %v", err)
-		}
-		napravs[id] = naprav{
-			name: name,
-			url:  apiLink + strconv.Itoa(id),
-		}
+		var n naprav
+		rows.Scan(&n.id, &n.name, &n.payment, &n.form, &n.eduLevel, &n.url)
+		napravs = append(napravs, n)
 	}
 	return napravs
 }
 
-// prolly should just make data in tables fit defaults TODO? also add links in tables
 func parseAbitConstraints(u *auth.User) ([]string, []string, []string) {
 	p := make([]string, 0, len(u.Payments))
 	for _, v := range u.Payments {

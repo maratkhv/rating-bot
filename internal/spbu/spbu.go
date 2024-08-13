@@ -24,7 +24,7 @@ type naprav struct {
 	payment  string
 	form     string
 	eduLevel string
-	link     string
+	url      string
 }
 
 type abit struct {
@@ -93,7 +93,7 @@ func Check(u *auth.User) []string {
 
 // ugly parsing of html but i let it be
 func (n *naprav) getList() {
-	resp, err := http.Get(n.link)
+	resp, err := http.Get(n.url)
 	if err != nil {
 		log.Fatalf("get request fail: %v", err)
 	}
@@ -106,7 +106,7 @@ func (n *naprav) getList() {
 		var data bachData
 		err = json.Unmarshal(r, &data)
 		if err != nil {
-			log.Fatalf("error unmarshalling data got by url: %s error: %v", n.link, err)
+			log.Fatalf("error unmarshalling data got by url: %s error: %v", n.url, err)
 		}
 		n.list = data.List
 		return
@@ -150,7 +150,7 @@ func (n *naprav) getList() {
 								if !strings.Contains(d, ",") {
 									num, err := strconv.Atoi(td.FirstChild.Data)
 									if err != nil {
-										log.Fatalf("error (get %v) atoi'ing %v: %v", n.link, td.Data, err)
+										log.Fatalf("error (get %v) atoi'ing %v: %v", n.url, td.Data, err)
 									}
 									a.Priority = num
 								}
@@ -208,7 +208,7 @@ func retrieveNapravs(u *auth.User) []naprav {
 		}
 		for rows.Next() {
 			var n naprav
-			rows.Scan(&n.id, &n.name, &n.capacity, &n.payment, &n.form, &n.eduLevel, &n.link)
+			rows.Scan(&n.id, &n.name, &n.capacity, &n.payment, &n.form, &n.eduLevel, &n.url)
 			napravs = append(napravs, n)
 		}
 		return napravs
@@ -221,7 +221,7 @@ func retrieveNapravs(u *auth.User) []naprav {
 	}
 	for rows.Next() {
 		var n naprav
-		rows.Scan(&n.id, &n.name, &n.capacity, &n.payment, &n.form, &n.eduLevel, &n.link)
+		rows.Scan(&n.id, &n.name, &n.capacity, &n.payment, &n.form, &n.eduLevel, &n.url)
 		napravs = append(napravs, n)
 	}
 	return napravs
