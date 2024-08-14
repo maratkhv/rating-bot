@@ -1,10 +1,3 @@
-/*
-	TODO:
-DATABASE TABLES TEMPLATES:
-
-
-*/
-
 package db
 
 import (
