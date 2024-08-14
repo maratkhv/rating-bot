@@ -70,13 +70,17 @@ func main() {
 				unknownCommand(update.Message, bot)
 				continue
 			}
-
 			msg := tgbotapi.NewMessage(user.Id, "Собираю информацию...")
-			bot.Send(msg)
+			var del tgbotapi.DeleteMessageConfig
+			if message, err := bot.Send(msg); err == nil {
+				del = tgbotapi.NewDeleteMessage(user.Id, message.MessageID)
+			}
 			for _, v := range handl(user) {
 				msg := tgbotapi.NewMessage(user.Id, v)
 				bot.Send(msg)
 			}
+
+			bot.Request(del)
 
 		}
 	}
