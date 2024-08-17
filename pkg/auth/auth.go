@@ -33,7 +33,7 @@ type User struct {
 	// reserved
 	Vuzes []string
 
-	// these are lists of naprav's IDs where user vas found
+	// these are lists of naprav's IDs where user was found
 	Spbstu []int
 	Spbu   []int
 }
