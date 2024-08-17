@@ -3,6 +3,7 @@ package spbu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -12,19 +13,21 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/net/html"
 )
 
 type naprav struct {
-	id       int
-	name     string
-	capacity int
-	list     []abit
-	payment  string
-	form     string
-	eduLevel string
-	url      string
+	Id       int
+	Name     string
+	Capacity int
+	List     []abit
+	Payment  string
+	Form     string
+	EduLevel string
+	Url      string
 }
 
 type abit struct {
@@ -44,12 +47,15 @@ func Check(u *auth.User) []string {
 	napravs := retrieveNapravs(u)
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, 10)
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
 	for i := range napravs {
 		wg.Add(1)
 		semaphore <- struct{}{}
 		go func() {
 			defer wg.Done()
-			napravs[i].getList()
+			napravs[i].getList(redisClient)
 			<-semaphore
 		}()
 	}
@@ -61,11 +67,11 @@ func Check(u *auth.User) []string {
 
 	for _, n := range napravs {
 		var origs int
-		for _, abit := range n.list {
+		for _, abit := range n.List {
 			if abit.Snils == u.Snils {
-				s := fmt.Sprintf("%s: Ты %d из %d\nПеред тобой %d оригиналов", n.name, abit.OrderNumber, len(n.list), origs)
+				s := fmt.Sprintf("%s: Ты %d из %d\nПеред тобой %d оригиналов", n.Name, abit.OrderNumber, len(n.List), origs)
 				response = append(response, s)
-				userNapravs = append(userNapravs, n.id)
+				userNapravs = append(userNapravs, n.Id)
 				break
 			}
 			if abit.HasOriginal {
@@ -92,13 +98,36 @@ func Check(u *auth.User) []string {
 }
 
 // ugly parsing of html but i let it be
-func (n *naprav) getList() {
-	resp, err := http.Get(n.url)
+func (n *naprav) getList(r *redis.Client) {
+	var redisKey = fmt.Sprintf("spbu:%d", n.Id)
+	if jsonList, err := r.Get(context.Background(), redisKey).Result(); err == nil {
+		err = json.Unmarshal([]byte(jsonList), &n)
+		if err != nil {
+			log.Fatal(err)
+		}
+		return
+	} else if !errors.Is(err, redis.Nil) {
+		log.Fatal(err)
+	}
+
+	defer func() {
+		data, err := json.Marshal(n)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = r.SetNX(context.Background(), redisKey, data, 10*time.Minute).Err()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	resp, err := http.Get(n.Url)
 	if err != nil {
 		log.Fatalf("get request fail: %v", err)
 	}
 
-	if n.eduLevel == "Бакалавриат" {
+	if n.EduLevel == "Бакалавриат" {
 		r, err := io.ReadAll(resp.Body)
 		if err != nil {
 			log.Fatalf("error reading response: %v", err)
@@ -106,9 +135,9 @@ func (n *naprav) getList() {
 		var data bachData
 		err = json.Unmarshal(r, &data)
 		if err != nil {
-			log.Fatalf("error unmarshalling data got by url: %s error: %v", n.url, err)
+			log.Fatalf("error unmarshalling data got by url: %s error: %v", n.Url, err)
 		}
-		n.list = data.List
+		n.List = data.List
 		return
 	}
 
@@ -150,7 +179,7 @@ func (n *naprav) getList() {
 								if !strings.Contains(d, ",") {
 									num, err := strconv.Atoi(td.FirstChild.Data)
 									if err != nil {
-										log.Fatalf("error (get %v) atoi'ing %v: %v", n.url, td.Data, err)
+										log.Fatalf("error (get %v) atoi'ing %v: %v", n.Url, td.Data, err)
 									}
 									a.Priority = num
 								}
@@ -177,7 +206,7 @@ func (n *naprav) getList() {
 						}
 
 					}
-					n.list = append(n.list, a)
+					n.List = append(n.List, a)
 				}
 
 			}
@@ -208,7 +237,7 @@ func retrieveNapravs(u *auth.User) []naprav {
 		}
 		for rows.Next() {
 			var n naprav
-			rows.Scan(&n.id, &n.name, &n.capacity, &n.payment, &n.form, &n.eduLevel, &n.url)
+			rows.Scan(&n.Id, &n.Name, &n.Capacity, &n.Payment, &n.Form, &n.EduLevel, &n.Url)
 			napravs = append(napravs, n)
 		}
 		return napravs
@@ -221,7 +250,7 @@ func retrieveNapravs(u *auth.User) []naprav {
 	}
 	for rows.Next() {
 		var n naprav
-		rows.Scan(&n.id, &n.name, &n.capacity, &n.payment, &n.form, &n.eduLevel, &n.url)
+		rows.Scan(&n.Id, &n.Name, &n.Capacity, &n.Payment, &n.Form, &n.EduLevel, &n.Url)
 		napravs = append(napravs, n)
 	}
 	return napravs
