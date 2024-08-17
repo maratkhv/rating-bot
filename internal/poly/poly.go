@@ -3,6 +3,7 @@ package poly
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -11,17 +12,20 @@ import (
 	"ratinger/pkg/db"
 	"strconv"
 	"sync"
+	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type naprav struct {
-	id                int
-	name              string
+	Id                int
+	Name              string
 	DirectionCapacity int
 	List              []abit
-	payment           string
-	form              string
-	eduLevel          string
-	url               string
+	Payment           string
+	Form              string
+	EduLevel          string
+	Url               string
 }
 
 type abit struct {
@@ -36,12 +40,15 @@ func Check(u *auth.User) []string {
 	var wg sync.WaitGroup
 	response := make([]string, 0)
 	semaphore := make(chan struct{}, 20)
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
 
 	for i := range napravs {
 		wg.Add(1)
 		semaphore <- struct{}{}
 		go func() {
-			napravs[i].getList()
+			napravs[i].getList(redisClient)
 			wg.Done()
 			<-semaphore
 		}()
@@ -55,9 +62,9 @@ func Check(u *auth.User) []string {
 		var origs, uc int
 		for i, v := range n.List {
 			if v.UserSnils == u.Snils {
-				response = append(response, fmt.Sprintf("%s (всего %d мест):\nТы %d из %d, выше тебя %d оригиналов\n", n.name, n.DirectionCapacity, i+1, len(n.List), origs))
+				response = append(response, fmt.Sprintf("%s (всего %d мест):\nТы %d из %d, выше тебя %d оригиналов\n", n.Name, n.DirectionCapacity, i+1, len(n.List), origs))
 				uniqueCounter += uc
-				abitNapravs = append(abitNapravs, n.id)
+				abitNapravs = append(abitNapravs, n.Id)
 				break
 			}
 			if v.HasOriginalDocuments {
@@ -90,9 +97,32 @@ func Check(u *auth.User) []string {
 
 }
 
-func (n *naprav) getList() {
+func (n *naprav) getList(r *redis.Client) {
+	var redisKey = fmt.Sprintf("spbstu:%d", n.Id)
+	if jsonList, err := r.Get(context.Background(), redisKey).Result(); err == nil {
+		err = json.Unmarshal([]byte(jsonList), &n)
+		if err != nil {
+			log.Fatal(err)
+		}
+		return
+	} else if !errors.Is(err, redis.Nil) {
+		log.Fatal(err)
+	}
+
+	defer func() {
+		data, err := json.Marshal(n)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = r.SetNX(context.Background(), redisKey, data, 10*time.Minute).Err()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", n.url, nil)
+	req, err := http.NewRequest("GET", n.Url, nil)
 	if err != nil {
 		log.Fatalf("error creating req: %v", err)
 	}
@@ -104,12 +134,12 @@ func (n *naprav) getList() {
 	}
 	defer res.Body.Close()
 
-	r, err := io.ReadAll(res.Body)
+	read, err := io.ReadAll(res.Body)
 	if err != nil {
 		log.Fatalf("error reading: %v", err)
 	}
 
-	err = json.Unmarshal(r, &n)
+	err = json.Unmarshal(read, &n)
 	if err != nil {
 		log.Fatalf("error unmarshalling: %v", err)
 	}
@@ -126,7 +156,7 @@ func retrieveNapravs(u *auth.User) []naprav {
 		}
 		for rows.Next() {
 			var n naprav
-			rows.Scan(&n.id, &n.name, &n.payment, &n.form, &n.eduLevel, &n.url)
+			rows.Scan(&n.Id, &n.Name, &n.Payment, &n.Form, &n.EduLevel, &n.Url)
 			napravs = append(napravs, n)
 		}
 		return napravs
@@ -139,7 +169,7 @@ func retrieveNapravs(u *auth.User) []naprav {
 	}
 	for rows.Next() {
 		var n naprav
-		rows.Scan(&n.id, &n.name, &n.payment, &n.form, &n.eduLevel, &n.url)
+		rows.Scan(&n.Id, &n.Name, &n.Payment, &n.Form, &n.EduLevel, &n.Url)
 		napravs = append(napravs, n)
 	}
 	return napravs
