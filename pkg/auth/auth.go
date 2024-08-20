@@ -40,7 +40,7 @@ type User struct {
 
 // TODO: redo this
 func DeleteUser(id int64) error {
-	conn := db.NeonConnect()
+	conn := db.Connect()
 	defer conn.Close(context.Background())
 	_, err := conn.Exec(context.Background(), "delete from users where id=$1", id)
 	if err != nil {
@@ -50,7 +50,7 @@ func DeleteUser(id int64) error {
 }
 
 func (u *User) AddInfo(msg string) error {
-	db := db.NeonConnect()
+	db := db.Connect()
 	defer db.Close(context.Background())
 	var query string
 	var err error
@@ -109,7 +109,7 @@ func (u *User) AddInfo(msg string) error {
 }
 
 func GetUserData(id int64) *User {
-	conn := db.NeonConnect()
+	conn := db.Connect()
 	defer conn.Close(context.Background())
 	row, err := conn.Query(context.Background(), "select snils, payments, forms, vuzes, spbstu, spbu, auth_status, edu_level from users where id=$1", id)
 	if err != nil {

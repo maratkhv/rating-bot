@@ -83,7 +83,7 @@ func Check(u *auth.User) []string {
 
 	if u.Spbu == nil {
 		u.Spbu = userNapravs
-		db := db.NeonConnect()
+		db := db.Connect()
 		_, err := db.Exec(context.Background(), "update users set spbu=$1 where id=$2", u.Spbu, u.Id)
 		if err != nil {
 			log.Fatalf("db error: %v", err)
@@ -228,7 +228,7 @@ func (n *naprav) getList(r *redis.Client) {
 
 func retrieveNapravs(u *auth.User) []naprav {
 	napravs := make([]naprav, 0, len(u.Spbu))
-	conn := db.NeonConnect()
+	conn := db.Connect()
 	defer conn.Close(context.Background())
 	if u.Spbu != nil {
 		rows, err := conn.Query(context.Background(), "select * from spbu where id = any($1)", u.Spbu)

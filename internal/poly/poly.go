@@ -78,7 +78,7 @@ func Check(u *auth.User) []string {
 	}
 
 	if len(abitNapravs) != 0 && u.Spbstu == nil {
-		conn := db.NeonConnect()
+		conn := db.Connect()
 		defer conn.Close(context.Background())
 		_, err := conn.Exec(context.Background(), "update users set spbstu=$1 where snils=$2", abitNapravs, u.Snils)
 		if err != nil {
@@ -147,7 +147,7 @@ func (n *naprav) getList(r *redis.Client) {
 
 func retrieveNapravs(u *auth.User) []naprav {
 	napravs := make([]naprav, 0, len(u.Spbstu))
-	conn := db.NeonConnect()
+	conn := db.Connect()
 	defer conn.Close(context.Background())
 	if u.Spbstu != nil {
 		rows, err := conn.Query(context.Background(), "select * from spbstu where id = any($1)", u.Spbstu)

@@ -9,7 +9,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-func NeonConnect() *pgx.Conn {
+func Connect() *pgx.Conn {
 	godotenv.Load()
 	var connString = os.Getenv("DB_CONNECTION_STRING")
 	conn, err := pgx.Connect(context.Background(), connString)
