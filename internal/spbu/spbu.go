@@ -46,7 +46,7 @@ type bachData struct {
 func Check(u *auth.User) []string {
 	napravs := retrieveNapravs(u)
 	var wg sync.WaitGroup
-	semaphore := make(chan struct{}, 10)
+	semaphore := make(chan struct{}, 20)
 	redisClient := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
