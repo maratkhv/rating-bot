@@ -1,3 +1,8 @@
+/*
+Package has to be rewritten
+and not ready for use
+*/
+
 package leti
 
 import (
