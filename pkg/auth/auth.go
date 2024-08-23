@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"ratinger/model"
 	"ratinger/pkg/db"
 )
 
@@ -17,7 +18,7 @@ const (
 
 var (
 	ErrExpectedSnils       error = errors.New("expected snils")
-	ErrExpectedFrom        error = errors.New("expected form or /done")
+	ErrExpectedForm        error = errors.New("expected form or /done")
 	ErrExpectedPaymentFrom error = errors.New("expected payment form or /done")
 	ErrExpectedEduLevel    error = errors.New("expected edu level")
 )
@@ -38,7 +39,6 @@ type User struct {
 	Spbu   []int
 }
 
-// TODO: redo this
 func DeleteUser(id int64) error {
 	conn := db.Connect()
 	defer conn.Close(context.Background())
@@ -49,7 +49,8 @@ func DeleteUser(id int64) error {
 	return nil
 }
 
-func (u *User) AddInfo(msg string) error {
+func (u *User) AddInfo(msg string) (model.AuthResponse, error) {
+	r := model.AuthResponse{}
 	db := db.Connect()
 	defer db.Close(context.Background())
 	var query string
@@ -59,11 +60,13 @@ func (u *User) AddInfo(msg string) error {
 
 	case NOT_AUTHED:
 		if !isValidSnils(msg) {
-			return ErrExpectedSnils
+			return r, ErrExpectedSnils
 		}
 		u.Snils, u.AuthStatus = msg, AUTHED_WITH_SNILS
 		query = "insert into users(id, snils, auth_status) values($1, $2, $3)"
 		_, err = db.Exec(context.Background(), query, u.Id, u.Snils, u.AuthStatus)
+		r.Message = "Снилс успешно введен!\nТеперь выбери вид оплаты обучения, на которые ты подавал и введи /done когда закончишь"
+		r.Markup = "payment"
 
 	case AUTHED_WITH_SNILS:
 		if !isValidPayment(msg) {
@@ -71,9 +74,11 @@ func (u *User) AddInfo(msg string) error {
 				query = "update users set auth_status=$1 where id=$2"
 				u.AuthStatus = AUTHED_WITH_PAYMENTS
 				_, err = db.Exec(context.Background(), query, u.AuthStatus, u.Id)
-				return err
+				r.Message = "Сейчас выбери формы поступления. Тут также - напиши /done как закончишь"
+				r.Markup = "form"
+				return r, err
 			}
-			return ErrExpectedPaymentFrom
+			return r, ErrExpectedPaymentFrom
 		}
 		query = "update users set payments = $1 where id=$2"
 		u.Payments = append(u.Payments, msg)
@@ -85,9 +90,11 @@ func (u *User) AddInfo(msg string) error {
 				query = "update users set auth_status=$1 where id=$2"
 				u.AuthStatus = AUTHED_WITH_FORMS
 				_, err = db.Exec(context.Background(), query, u.AuthStatus, u.Id)
-				return err
+				r.Message = "И последнее - выбери уровень образования"
+				r.Markup = "eduLevel"
+				return r, err
 			}
-			return ErrExpectedFrom
+			return r, ErrExpectedForm
 		}
 		query = "update users set forms = $1 where id=$2"
 		u.Forms = append(u.Forms, msg)
@@ -95,7 +102,7 @@ func (u *User) AddInfo(msg string) error {
 
 	case AUTHED_WITH_FORMS:
 		if !isValidEduLevel(msg) {
-			return ErrExpectedEduLevel
+			return r, ErrExpectedEduLevel
 		}
 		u.EduLevel, u.AuthStatus = []string{msg}, AUTHED
 		if u.EduLevel[0] == "Бакалавриат" {
@@ -103,9 +110,12 @@ func (u *User) AddInfo(msg string) error {
 		}
 		query = "update users set edu_level = $1, auth_status = $2 where id=$3"
 		_, err = db.Exec(context.Background(), query, u.EduLevel, u.AuthStatus, u.Id)
+
+		r.Message = "Отлично! Теперь ты можешь пользоваться ботом!\nПросто кликай на нужный вуз и наблюдай за своими позициями\nЕсли ты поменял что-то из введенных данных - введи команду /hardreset\nА если бот не находит тебя в списках попробуй ввести команду /reset"
+		r.Markup = "vuzes"
 	}
 
-	return err
+	return r, err
 }
 
 func GetUserData(id int64) *User {

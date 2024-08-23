@@ -1,12 +1,8 @@
 package main
 
-// TODO: this whole package needs to be rewritten but after spbu i guess
-
 import (
 	"log"
 	"os"
-
-	// "ratinger/internal/leti"
 
 	"ratinger/internal/poly"
 	"ratinger/internal/spbu"
@@ -16,13 +12,43 @@ import (
 	"github.com/joho/godotenv"
 )
 
-var numericKeyboard = tgbotapi.NewReplyKeyboard(
+var vuzesKeyboard = tgbotapi.NewReplyKeyboard(
 	tgbotapi.NewKeyboardButtonRow(
-		tgbotapi.NewKeyboardButton("ЛЭТИ"),
 		tgbotapi.NewKeyboardButton("СПБПУ"),
 		tgbotapi.NewKeyboardButton("СПБГУ"),
 	),
 )
+
+var formKeyboard = tgbotapi.NewReplyKeyboard(
+	tgbotapi.NewKeyboardButtonRow(
+		tgbotapi.NewKeyboardButton("Очная"),
+		tgbotapi.NewKeyboardButton("Очно-заочная"),
+		tgbotapi.NewKeyboardButton("Заочная"),
+	),
+)
+
+var eduLevelKeyboard = tgbotapi.NewReplyKeyboard(
+	tgbotapi.NewKeyboardButtonRow(
+		tgbotapi.NewKeyboardButton("Бакалавриат"),
+		tgbotapi.NewKeyboardButton("Магистратура"),
+		tgbotapi.NewKeyboardButton("Аспирантура"),
+	),
+)
+
+var paymentKeyboard = tgbotapi.NewReplyKeyboard(
+	tgbotapi.NewKeyboardButtonRow(
+		tgbotapi.NewKeyboardButton("Контракт"),
+		tgbotapi.NewKeyboardButton("Бюджет"),
+		tgbotapi.NewKeyboardButton("Целевое"),
+	),
+)
+
+var markup = map[string]*tgbotapi.ReplyKeyboardMarkup{
+	"payment":  &paymentKeyboard,
+	"form":     &formKeyboard,
+	"eduLevel": &eduLevelKeyboard,
+	"vuzes":    &vuzesKeyboard,
+}
 
 func main() {
 	godotenv.Load()
@@ -40,14 +66,27 @@ func main() {
 
 	updates := bot.GetUpdatesChan(u)
 	for update := range updates {
+
 		if update.Message != nil {
 			message := update.Message.Text
 			user := auth.GetUserData(update.Message.Chat.ID)
 
+			if message == "/start" {
+				sendHello(user.Id, bot)
+				continue
+			}
+
 			if user.AuthStatus != auth.AUTHED {
-				e := user.AddInfo(message)
+				resp, e := user.AddInfo(message)
 				if e != nil {
 					msg := tgbotapi.NewMessage(user.Id, e.Error())
+					bot.Send(msg)
+				}
+				if resp.Message != "" {
+					msg := tgbotapi.NewMessage(user.Id, resp.Message)
+					if resp.Markup != "" {
+						msg.ReplyMarkup = markup[resp.Markup]
+					}
 					bot.Send(msg)
 				}
 				continue
@@ -60,8 +99,6 @@ func main() {
 
 			var handl func(*auth.User) []string
 			switch update.Message.Text {
-			case "ЛЭТИ":
-				// handl = leti.Check
 			case "СПБПУ":
 				handl = poly.Check
 			case "СПБГУ":
@@ -84,35 +121,4 @@ func main() {
 
 		}
 	}
-}
-
-// TODO: these should go to diff file i guess?
-
-func sendHello(chatID int64, bot *tgbotapi.BotAPI) {
-	msg := tgbotapi.NewMessage(chatID, "Привет!\nЭто бот поможет Тебе быстро найти себя в списках, а также покажет полезную информацию")
-	bot.Send(msg)
-	msg.Text = "Для работы бота необходим Твой СНИЛС. Введи его в формате 555-666-777 89"
-	bot.Send(msg)
-}
-
-func reset(chatID int64, bot *tgbotapi.BotAPI) {
-	auth.DeleteUser(chatID)
-	msg := tgbotapi.NewMessage(chatID, "Введите новый СНИЛС")
-	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
-	bot.Send(msg)
-}
-
-func handleCommand(msg *tgbotapi.Message, bot *tgbotapi.BotAPI) {
-	switch msg.Command() {
-	case "reset":
-		reset(msg.Chat.ID, bot)
-	default:
-		unknownCommand(msg, bot)
-	}
-}
-
-func unknownCommand(msg *tgbotapi.Message, bot *tgbotapi.BotAPI) {
-	response := tgbotapi.NewMessage(msg.Chat.ID, "?")
-	response.ReplyToMessageID = msg.MessageID
-	bot.Send(response)
 }
