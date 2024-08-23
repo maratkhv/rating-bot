@@ -5,6 +5,9 @@ package main
 import (
 	"log"
 	"os"
+	"ratinger/internal/poly"
+	"ratinger/internal/spbu"
+	"ratinger/pkg/auth"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
@@ -48,6 +51,11 @@ var markup = map[string]*tgbotapi.ReplyKeyboardMarkup{
 	"vuzes":    &vuzesKeyboard,
 }
 
+type request struct {
+	user *auth.User
+	job  func(*auth.User) []string
+}
+
 func main() {
 	godotenv.Load()
 	token := os.Getenv("TOKEN")
@@ -62,15 +70,58 @@ func main() {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 600
 
-	workCh := make(chan tgbotapi.Update)
+	requestsCh := make(chan request)
 
 	for range 3 {
-		go worker(bot, workCh)
+		go worker(bot, requestsCh)
 	}
 
 	updates := bot.GetUpdatesChan(u)
 
-	for {
-		workCh <- <-updates
+	for update := range updates {
+		if update.Message == nil {
+			continue
+		}
+
+		message := update.Message.Text
+		user := auth.GetUserData(update.Message.Chat.ID)
+
+		if message == "/start" {
+			sendHello(user.Id, bot)
+			continue
+		}
+
+		if user.AuthStatus != auth.AUTHED {
+			resp, e := user.AddInfo(message)
+			if e != nil {
+				msg := tgbotapi.NewMessage(user.Id, e.Error())
+				bot.Send(msg)
+			}
+			if resp.Message != "" {
+				msg := tgbotapi.NewMessage(user.Id, resp.Message)
+				if resp.Markup != "" {
+					msg.ReplyMarkup = markup[resp.Markup]
+				}
+				bot.Send(msg)
+			}
+			continue
+		}
+
+		var job func(*auth.User) []string
+		switch update.Message.Text {
+		case "СПБПУ":
+			job = poly.Check
+		case "СПБГУ":
+			job = spbu.Check
+		default:
+			unknownCommand(update.Message, bot)
+			continue
+		}
+
+		requestsCh <- request{
+			user: user,
+			job:  job,
+		}
+
 	}
 }

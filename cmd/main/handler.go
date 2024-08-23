@@ -1,61 +1,20 @@
 package main
 
 import (
-	"ratinger/internal/poly"
-	"ratinger/internal/spbu"
-	"ratinger/pkg/auth"
-
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-func worker(bot *tgbotapi.BotAPI, workCh chan tgbotapi.Update) {
-	for update := range workCh {
-		if update.Message == nil {
-			return
-		}
-
-		message := update.Message.Text
-		user := auth.GetUserData(update.Message.Chat.ID)
-
-		if message == "/start" {
-			sendHello(user.Id, bot)
-			return
-		}
-
-		if user.AuthStatus != auth.AUTHED {
-			resp, e := user.AddInfo(message)
-			if e != nil {
-				msg := tgbotapi.NewMessage(user.Id, e.Error())
-				bot.Send(msg)
-			}
-			if resp.Message != "" {
-				msg := tgbotapi.NewMessage(user.Id, resp.Message)
-				if resp.Markup != "" {
-					msg.ReplyMarkup = markup[resp.Markup]
-				}
-				bot.Send(msg)
-			}
-			return
-		}
-
-		var handl func(*auth.User) []string
-		switch update.Message.Text {
-		case "СПБПУ":
-			handl = poly.Check
-		case "СПБГУ":
-			handl = spbu.Check
-		default:
-			unknownCommand(update.Message, bot)
-			return
-		}
-
-		msg := tgbotapi.NewMessage(user.Id, "Собираю информацию...")
+func worker(bot *tgbotapi.BotAPI, reqCH chan request) {
+	for r := range reqCH {
+		msg := tgbotapi.NewMessage(r.user.Id, "Собираю информацию...")
 		var del tgbotapi.DeleteMessageConfig
+
 		if message, err := bot.Send(msg); err == nil {
-			del = tgbotapi.NewDeleteMessage(user.Id, message.MessageID)
+			del = tgbotapi.NewDeleteMessage(r.user.Id, message.MessageID)
 		}
-		for _, v := range handl(user) {
-			msg := tgbotapi.NewMessage(user.Id, v)
+
+		for _, v := range r.job(r.user) {
+			msg := tgbotapi.NewMessage(r.user.Id, v)
 			bot.Send(msg)
 		}
 
