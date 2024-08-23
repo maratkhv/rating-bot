@@ -1,12 +1,10 @@
 package main
 
+// TODO: implement /reset and /hardreset cmds
+
 import (
 	"log"
 	"os"
-
-	"ratinger/internal/poly"
-	"ratinger/internal/spbu"
-	"ratinger/pkg/auth"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
@@ -64,61 +62,15 @@ func main() {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 600
 
+	workCh := make(chan tgbotapi.Update)
+
+	for range 3 {
+		go worker(bot, workCh)
+	}
+
 	updates := bot.GetUpdatesChan(u)
-	for update := range updates {
 
-		if update.Message != nil {
-			message := update.Message.Text
-			user := auth.GetUserData(update.Message.Chat.ID)
-
-			if message == "/start" {
-				sendHello(user.Id, bot)
-				continue
-			}
-
-			if user.AuthStatus != auth.AUTHED {
-				resp, e := user.AddInfo(message)
-				if e != nil {
-					msg := tgbotapi.NewMessage(user.Id, e.Error())
-					bot.Send(msg)
-				}
-				if resp.Message != "" {
-					msg := tgbotapi.NewMessage(user.Id, resp.Message)
-					if resp.Markup != "" {
-						msg.ReplyMarkup = markup[resp.Markup]
-					}
-					bot.Send(msg)
-				}
-				continue
-			}
-
-			if update.Message.IsCommand() {
-				handleCommand(update.Message, bot)
-				continue
-			}
-
-			var handl func(*auth.User) []string
-			switch update.Message.Text {
-			case "СПБПУ":
-				handl = poly.Check
-			case "СПБГУ":
-				handl = spbu.Check
-			default:
-				unknownCommand(update.Message, bot)
-				continue
-			}
-			msg := tgbotapi.NewMessage(user.Id, "Собираю информацию...")
-			var del tgbotapi.DeleteMessageConfig
-			if message, err := bot.Send(msg); err == nil {
-				del = tgbotapi.NewDeleteMessage(user.Id, message.MessageID)
-			}
-			for _, v := range handl(user) {
-				msg := tgbotapi.NewMessage(user.Id, v)
-				bot.Send(msg)
-			}
-
-			bot.Request(del)
-
-		}
+	for {
+		workCh <- <-updates
 	}
 }
