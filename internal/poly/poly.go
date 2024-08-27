@@ -43,6 +43,7 @@ func Check(u *auth.User) []string {
 	redisClient := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
+	defer redisClient.Close()
 
 	for i := range napravs {
 		wg.Add(1)
@@ -79,7 +80,8 @@ func Check(u *auth.User) []string {
 
 	if len(abitNapravs) != 0 && u.Spbstu == nil {
 		conn := db.Connect()
-		defer conn.Close(context.Background())
+		defer conn.Close()
+		// TODO: u.spbstu = u.
 		_, err := conn.Exec(context.Background(), "update users set spbstu=$1 where snils=$2", abitNapravs, u.Snils)
 		if err != nil {
 			log.Fatal(err)
@@ -148,7 +150,7 @@ func (n *naprav) getList(r *redis.Client) {
 func retrieveNapravs(u *auth.User) []naprav {
 	napravs := make([]naprav, 0, len(u.Spbstu))
 	conn := db.Connect()
-	defer conn.Close(context.Background())
+	defer conn.Close()
 	if u.Spbstu != nil {
 		rows, err := conn.Query(context.Background(), "select * from spbstu where id = any($1)", u.Spbstu)
 		if err != nil {

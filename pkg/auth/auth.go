@@ -41,7 +41,7 @@ type User struct {
 
 func DeleteUser(id int64) error {
 	conn := db.Connect()
-	defer conn.Close(context.Background())
+	defer conn.Close()
 	_, err := conn.Exec(context.Background(), "delete from users where id=$1", id)
 	if err != nil {
 		return err
@@ -52,7 +52,7 @@ func DeleteUser(id int64) error {
 func (u *User) AddInfo(msg string) (model.AuthResponse, error) {
 	r := model.AuthResponse{}
 	db := db.Connect()
-	defer db.Close(context.Background())
+	defer db.Close()
 	var query string
 	var err error
 
@@ -120,7 +120,7 @@ func (u *User) AddInfo(msg string) (model.AuthResponse, error) {
 
 func GetUserData(id int64) *User {
 	conn := db.Connect()
-	defer conn.Close(context.Background())
+	defer conn.Close()
 	row, err := conn.Query(context.Background(), "select snils, payments, forms, vuzes, spbstu, spbu, auth_status, edu_level from users where id=$1", id)
 	if err != nil {
 		log.Fatalf("query err: %v", err)

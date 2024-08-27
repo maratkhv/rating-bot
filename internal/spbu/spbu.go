@@ -50,6 +50,8 @@ func Check(u *auth.User) []string {
 	redisClient := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
+	defer redisClient.Close()
+
 	for i := range napravs {
 		wg.Add(1)
 		semaphore <- struct{}{}
@@ -229,7 +231,7 @@ func (n *naprav) getList(r *redis.Client) {
 func retrieveNapravs(u *auth.User) []naprav {
 	napravs := make([]naprav, 0, len(u.Spbu))
 	conn := db.Connect()
-	defer conn.Close(context.Background())
+	defer conn.Close()
 	if u.Spbu != nil {
 		rows, err := conn.Query(context.Background(), "select * from spbu where id = any($1)", u.Spbu)
 		if err != nil {

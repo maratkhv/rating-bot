@@ -5,14 +5,14 @@ import (
 	"log"
 	"os"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
 
-func Connect() *pgx.Conn {
+func Connect() *pgxpool.Pool {
 	godotenv.Load()
 	var connString = os.Getenv("DB_CONNECTION_STRING")
-	conn, err := pgx.Connect(context.Background(), connString)
+	conn, err := pgxpool.New(context.Background(), connString)
 	if err != nil {
 		log.Fatal(err)
 	}
