@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
-	"ratinger/pkg/repository"
+	"ratinger/internal/repository"
 )
 
 const (
