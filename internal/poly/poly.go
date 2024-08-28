@@ -9,7 +9,6 @@ import (
 	"log"
 	"net/http"
 	"ratinger/pkg/models/auth"
-	"ratinger/pkg/models/db"
 	"ratinger/pkg/repository"
 	"strconv"
 	"sync"
@@ -81,7 +80,7 @@ func Check(repo *repository.Repo, u *auth.User) []string {
 
 	if len(abitNapravs) > len(u.Spbstu) || u.Spbstu == nil {
 		u.Spbstu = abitNapravs
-		args := db.Args{
+		args := repository.Args{
 			"spbstu": u.Spbstu,
 		}
 		err := repo.Db.UpdateUser(context.Background(), u.Id, args)

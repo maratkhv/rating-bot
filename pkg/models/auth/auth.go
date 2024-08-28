@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	"ratinger/pkg/models/db"
 	"ratinger/pkg/repository"
 )
 
@@ -76,7 +75,7 @@ func (u *User) AddInfo(repo *repository.Repo, msg string) (response, error) {
 		if !isValidPayment(msg) {
 			if msg == "/done" && u.Payments != nil {
 				u.AuthStatus = AUTHED_WITH_PAYMENTS
-				args := db.Args{
+				args := repository.Args{
 					"auth_status": u.AuthStatus,
 				}
 				err = repo.Db.UpdateUser(context.Background(), u.Id, args)
@@ -87,7 +86,7 @@ func (u *User) AddInfo(repo *repository.Repo, msg string) (response, error) {
 			return r, ErrExpectedPaymentFrom
 		}
 		u.Payments = append(u.Payments, msg)
-		args := db.Args{
+		args := repository.Args{
 			"payments": u.Payments,
 		}
 		err = repo.Db.UpdateUser(context.Background(), u.Id, args)
@@ -96,7 +95,7 @@ func (u *User) AddInfo(repo *repository.Repo, msg string) (response, error) {
 		if !isValidForm(msg) {
 			if msg == "/done" && u.Forms != nil {
 				u.AuthStatus = AUTHED_WITH_FORMS
-				args := db.Args{
+				args := repository.Args{
 					"auth_status": u.AuthStatus,
 				}
 				err = repo.Db.UpdateUser(context.Background(), u.Id, args)
@@ -107,7 +106,7 @@ func (u *User) AddInfo(repo *repository.Repo, msg string) (response, error) {
 			return r, ErrExpectedForm
 		}
 		u.Forms = append(u.Forms, msg)
-		args := db.Args{
+		args := repository.Args{
 			"forms": u.Forms,
 		}
 		err = repo.Db.UpdateUser(context.Background(), u.Id, args)
@@ -120,7 +119,7 @@ func (u *User) AddInfo(repo *repository.Repo, msg string) (response, error) {
 		if u.EduLevel[0] == "Бакалавриат" {
 			u.EduLevel = append(u.EduLevel, "Специалитет")
 		}
-		args := db.Args{
+		args := repository.Args{
 			"edu_level":   u.EduLevel,
 			"auth_status": u.AuthStatus,
 		}

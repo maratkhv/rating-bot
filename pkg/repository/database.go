@@ -3,13 +3,14 @@ package repository
 import (
 	"context"
 	"os"
-	"ratinger/pkg/models/db"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
+
+type Args map[string]any
 
 type database struct {
 	pool *pgxpool.Pool
@@ -59,7 +60,7 @@ func (db *database) InsertUser(ctx context.Context, id int64, snils string, auth
 	return nil
 }
 
-func (db *database) UpdateUser(ctx context.Context, userId int64, args db.Args) error {
+func (db *database) UpdateUser(ctx context.Context, userId int64, args Args) error {
 	query := "update users set "
 	nArgs := pgx.NamedArgs{
 		"id": userId,
