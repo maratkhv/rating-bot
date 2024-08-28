@@ -45,16 +45,13 @@ type response struct {
 	Error error
 }
 
-// TODO: rewrite this using repository.Repo
-/* func DeleteUser(repo *repository.Repo, id int64) error {
-	conn := db.Connect()
-	defer conn.Close()
-	_, err := conn.Exec(context.Background(), "delete from users where id=$1", id)
+func DeleteUser(repo *repository.Repo, id int64) error {
+	err := repo.Db.DeleteUser(context.Background(), id)
 	if err != nil {
 		return err
 	}
 	return nil
-} */
+}
 
 func (u *User) AddInfo(repo *repository.Repo, msg string) (response, error) {
 	var r response
@@ -125,7 +122,7 @@ func (u *User) AddInfo(repo *repository.Repo, msg string) (response, error) {
 		}
 		err = repo.Db.UpdateUser(context.Background(), u.Id, args)
 
-		r.Message = "Отлично! Теперь ты можешь пользоваться ботом!\nПросто кликай на нужный вуз и наблюдай за своими позициями\nЕсли ты поменял что-то из введенных данных - введи команду /hardreset\nА если бот не находит тебя в списках попробуй ввести команду /reset\nПервый поиск может занять некоторое время, но дальше все будет быстрее"
+		r.Message = "Отлично! Теперь ты можешь пользоваться ботом!\nПросто кликай на нужный вуз и наблюдай за своими позициями\nЕсли ты поменял что-то из введенных данных - введи команду /reset\nА если бот не находит тебя в списках попробуй ввести команду /refresh\nПервый поиск может занять некоторое время, но дальше все будет быстрее"
 		r.Markup = "vuzes"
 	}
 
@@ -149,4 +146,9 @@ func GetUserData(repo *repository.Repo, id int64) *User {
 		}
 	}
 	return &u
+}
+
+func RefreshVuzes(repo *repository.Repo, id int64) error {
+	err := repo.Db.RefreshVuzes(context.Background(), id)
+	return err
 }

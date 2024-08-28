@@ -83,10 +83,41 @@ func (db *database) UpdateUser(ctx context.Context, userId int64, args Args) err
 		return err
 	}
 
-	tx.Commit(ctx)
-	return err
+	return tx.Commit(ctx)
 }
 
 func (db *database) SelectQuery(ctx context.Context, query string, args ...any) (pgx.Rows, error) {
 	return db.pool.Query(ctx, query, args...)
+}
+
+func (db *database) DeleteUser(ctx context.Context, id int64) error {
+	tx, err := db.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	query := "delete from users where id=$1"
+	_, err = tx.Exec(ctx, query, id)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (db *database) RefreshVuzes(ctx context.Context, id int64) error {
+	tx, err := db.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	query := "update users set spbstu=NULL, spbu=NULL where id=$1"
+	_, err = tx.Exec(ctx, query, id)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }

@@ -1,7 +1,5 @@
 package main
 
-// TODO: implement /reset and /hardreset cmds
-
 import (
 	"context"
 	"log"
@@ -113,6 +111,11 @@ func main() {
 				}
 				bot.Send(msg)
 			}
+			continue
+		}
+
+		if update.Message.IsCommand() {
+			handleCommand(update.Message, bot)
 			continue
 		}
 

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"ratinger/internal/models/auth"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -29,24 +32,42 @@ func sendHello(chatID int64, bot *tgbotapi.BotAPI) {
 	bot.Send(msg)
 }
 
-// func reset(chatID int64, bot *tgbotapi.BotAPI) {
-// 	auth.DeleteUser(chatID)
-// 	msg := tgbotapi.NewMessage(chatID, "Введите новый СНИЛС")
-// 	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
-// 	bot.Send(msg)
-// }
+func reset(id int64, bot *tgbotapi.BotAPI) {
+	err := auth.DeleteUser(repo, id)
+	if err != nil {
+		msg := tgbotapi.NewMessage(id, fmt.Sprintf("Случилась ошибка: %v", err))
+		bot.Send(msg)
+		return
+	}
+	msg := tgbotapi.NewMessage(id, "Введите новый СНИЛС")
+	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+	bot.Send(msg)
+}
 
-// func handleCommand(msg *tgbotapi.Message, bot *tgbotapi.BotAPI) {
-// 	switch msg.Command() {
-// 	case "reset":
-// 		reset(msg.Chat.ID, bot)
-// 	default:
-// 		unknownCommand(msg, bot)
-// 	}
-// }
+func handleCommand(msg *tgbotapi.Message, bot *tgbotapi.BotAPI) {
+	switch msg.Command() {
+	case "reset":
+		reset(msg.Chat.ID, bot)
+	case "refresh":
+		refresh(msg.Chat.ID, bot)
+	default:
+		unknownCommand(msg, bot)
+	}
+}
 
 func unknownCommand(msg *tgbotapi.Message, bot *tgbotapi.BotAPI) {
 	response := tgbotapi.NewMessage(msg.Chat.ID, "?")
 	response.ReplyToMessageID = msg.MessageID
 	bot.Send(response)
+}
+
+func refresh(id int64, bot *tgbotapi.BotAPI) {
+	err := auth.RefreshVuzes(repo, id)
+	if err != nil {
+		msg := tgbotapi.NewMessage(id, fmt.Sprintf("Случилась ошибка: %v", err))
+		bot.Send(msg)
+		return
+	}
+	msg := tgbotapi.NewMessage(id, "Готово")
+	bot.Send(msg)
 }
