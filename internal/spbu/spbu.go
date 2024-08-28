@@ -8,8 +8,9 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"ratinger/pkg/auth"
-	"ratinger/pkg/db"
+	"ratinger/pkg/models/auth"
+	"ratinger/pkg/models/db"
+	"ratinger/pkg/repository"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,8 +44,8 @@ type bachData struct {
 	List []abit
 }
 
-func Check(u *auth.User) []string {
-	napravs := retrieveNapravs(u)
+func Check(repo *repository.Repo, u *auth.User) []string {
+	napravs := retrieveNapravs(repo, u)
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, 20)
 	redisClient := redis.NewClient(&redis.Options{
@@ -83,12 +84,14 @@ func Check(u *auth.User) []string {
 
 	}
 
-	if u.Spbu == nil {
+	if len(userNapravs) > len(u.Spbu) || u.Spbu == nil {
 		u.Spbu = userNapravs
-		db := db.Connect()
-		_, err := db.Exec(context.Background(), "update users set spbu=$1 where id=$2", u.Spbu, u.Id)
+		args := db.Args{
+			"spbu": u.Spbu,
+		}
+		err := repo.Db.UpdateUser(context.Background(), u.Id, args)
 		if err != nil {
-			log.Fatalf("db error: %v", err)
+			log.Fatal(err)
 		}
 	}
 
@@ -228,15 +231,16 @@ func (n *naprav) getList(r *redis.Client) {
 
 }
 
-func retrieveNapravs(u *auth.User) []naprav {
+func retrieveNapravs(repo *repository.Repo, u *auth.User) []naprav {
 	napravs := make([]naprav, 0, len(u.Spbu))
-	conn := db.Connect()
-	defer conn.Close()
+
 	if u.Spbu != nil {
-		rows, err := conn.Query(context.Background(), "select * from spbu where id = any($1)", u.Spbu)
+		rows, err := repo.Db.SelectQuery(context.Background(), "select * from spbu where id = any($1)", u.Spbu)
 		if err != nil {
 			log.Fatalf("failed getting spbu: %v", err)
 		}
+		defer rows.Close()
+
 		for rows.Next() {
 			var n naprav
 			rows.Scan(&n.Id, &n.Name, &n.Capacity, &n.Payment, &n.Form, &n.EduLevel, &n.Url)
@@ -246,10 +250,12 @@ func retrieveNapravs(u *auth.User) []naprav {
 	}
 
 	p, f, el := parseAbitConstraints(u)
-	rows, err := conn.Query(context.Background(), "select * from spbu where payment = any($1) and form = any($2) and edu_level=any($3)", p, f, el)
+	rows, err := repo.Db.SelectQuery(context.Background(), "select * from spbu where payment = any($1) and form = any($2) and edu_level=any($3)", p, f, el)
 	if err != nil {
 		log.Fatalf("failed getting spbu: %v", err)
 	}
+	defer rows.Close()
+
 	for rows.Next() {
 		var n naprav
 		rows.Scan(&n.Id, &n.Name, &n.Capacity, &n.Payment, &n.Form, &n.EduLevel, &n.Url)

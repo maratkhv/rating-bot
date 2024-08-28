@@ -3,11 +3,13 @@ package main
 // TODO: implement /reset and /hardreset cmds
 
 import (
+	"context"
 	"log"
 	"os"
 	"ratinger/internal/poly"
 	"ratinger/internal/spbu"
-	"ratinger/pkg/auth"
+	"ratinger/pkg/models/auth"
+	"ratinger/pkg/repository"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
@@ -53,8 +55,10 @@ var markup = map[string]*tgbotapi.ReplyKeyboardMarkup{
 
 type request struct {
 	user *auth.User
-	job  func(*auth.User) []string
+	job  func(*repository.Repo, *auth.User) []string
 }
+
+var repo *repository.Repo
 
 func main() {
 	godotenv.Load()
@@ -76,6 +80,11 @@ func main() {
 		go worker(bot, requestsCh)
 	}
 
+	repo, err = repository.New(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	updates := bot.GetUpdatesChan(u)
 
 	for update := range updates {
@@ -84,7 +93,7 @@ func main() {
 		}
 
 		message := update.Message.Text
-		user := auth.GetUserData(update.Message.Chat.ID)
+		user := auth.GetUserData(repo, update.Message.Chat.ID)
 
 		if message == "/start" {
 			sendHello(user.Id, bot)
@@ -92,7 +101,7 @@ func main() {
 		}
 
 		if user.AuthStatus != auth.AUTHED {
-			resp, e := user.AddInfo(message)
+			resp, e := user.AddInfo(repo, message)
 			if e != nil {
 				msg := tgbotapi.NewMessage(user.Id, e.Error())
 				bot.Send(msg)
@@ -107,7 +116,7 @@ func main() {
 			continue
 		}
 
-		var job func(*auth.User) []string
+		var job func(*repository.Repo, *auth.User) []string
 		switch update.Message.Text {
 		case "СПБПУ":
 			job = poly.Check

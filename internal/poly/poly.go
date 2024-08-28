@@ -8,8 +8,9 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"ratinger/pkg/auth"
-	"ratinger/pkg/db"
+	"ratinger/pkg/models/auth"
+	"ratinger/pkg/models/db"
+	"ratinger/pkg/repository"
 	"strconv"
 	"sync"
 	"time"
@@ -35,8 +36,8 @@ type abit struct {
 	Priority             int
 }
 
-func Check(u *auth.User) []string {
-	napravs := retrieveNapravs(u)
+func Check(repo *repository.Repo, u *auth.User) []string {
+	napravs := retrieveNapravs(repo, u)
 	var wg sync.WaitGroup
 	response := make([]string, 0)
 	semaphore := make(chan struct{}, 20)
@@ -78,15 +79,15 @@ func Check(u *auth.User) []string {
 		}
 	}
 
-	if len(abitNapravs) != 0 && u.Spbstu == nil {
-		conn := db.Connect()
-		defer conn.Close()
-		// TODO: u.spbstu = u.
-		_, err := conn.Exec(context.Background(), "update users set spbstu=$1 where snils=$2", abitNapravs, u.Snils)
+	if len(abitNapravs) > len(u.Spbstu) || u.Spbstu == nil {
+		u.Spbstu = abitNapravs
+		args := db.Args{
+			"spbstu": u.Spbstu,
+		}
+		err := repo.Db.UpdateUser(context.Background(), u.Id, args)
 		if err != nil {
 			log.Fatal(err)
 		}
-		u.Spbstu = abitNapravs
 	}
 
 	if len(response) != 0 {
@@ -147,15 +148,16 @@ func (n *naprav) getList(r *redis.Client) {
 	}
 }
 
-func retrieveNapravs(u *auth.User) []naprav {
+func retrieveNapravs(repo *repository.Repo, u *auth.User) []naprav {
 	napravs := make([]naprav, 0, len(u.Spbstu))
-	conn := db.Connect()
-	defer conn.Close()
+
 	if u.Spbstu != nil {
-		rows, err := conn.Query(context.Background(), "select * from spbstu where id = any($1)", u.Spbstu)
+		rows, err := repo.Db.SelectQuery(context.Background(), "select * from spbstu where id = any($1)", u.Spbstu)
 		if err != nil {
 			log.Fatalf("failed getting spbstu: %v", err)
 		}
+		defer rows.Close()
+
 		for rows.Next() {
 			var n naprav
 			rows.Scan(&n.Id, &n.Name, &n.Payment, &n.Form, &n.EduLevel, &n.Url)
@@ -165,10 +167,12 @@ func retrieveNapravs(u *auth.User) []naprav {
 	}
 
 	p, f, el := parseAbitConstraints(u)
-	rows, err := conn.Query(context.Background(), "select * from spbstu where payment = any($1) and form = any($2) and edu_level=any($3)", p, f, el)
+	rows, err := repo.Db.SelectQuery(context.Background(), "select * from spbstu where payment = any($1) and form = any($2) and edu_level=any($3)", p, f, el)
 	if err != nil {
 		log.Fatalf("failed getting spbstu: %v", err)
 	}
+	defer rows.Close()
+
 	for rows.Next() {
 		var n naprav
 		rows.Scan(&n.Id, &n.Name, &n.Payment, &n.Form, &n.EduLevel, &n.Url)

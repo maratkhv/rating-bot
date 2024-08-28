@@ -13,7 +13,7 @@ func worker(bot *tgbotapi.BotAPI, reqCH chan request) {
 			del = tgbotapi.NewDeleteMessage(r.user.Id, message.MessageID)
 		}
 
-		for _, v := range r.job(r.user) {
+		for _, v := range r.job(repo, r.user) {
 			msg := tgbotapi.NewMessage(r.user.Id, v)
 			bot.Send(msg)
 		}
