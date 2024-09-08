@@ -2,12 +2,19 @@ package bot
 
 import (
 	"fmt"
+	"log/slog"
 	"ratinger/internal/models/auth"
+	"ratinger/internal/repository"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-func worker(bot *tgbotapi.BotAPI, reqCH chan request) {
+type workerRequest struct {
+	user *auth.User
+	job  func(*repository.Repo, *slog.Logger, *auth.User) []string
+}
+
+func worker(bot *tgbotapi.BotAPI, reqCH chan workerRequest) {
 	for r := range reqCH {
 		msg := tgbotapi.NewMessage(r.user.Id, "Собираю информацию...")
 		var del tgbotapi.DeleteMessageConfig
@@ -16,7 +23,7 @@ func worker(bot *tgbotapi.BotAPI, reqCH chan request) {
 			del = tgbotapi.NewDeleteMessage(r.user.Id, message.MessageID)
 		}
 
-		for _, v := range r.job(repo, r.user) {
+		for _, v := range r.job(repo, logger, r.user) {
 			msg := tgbotapi.NewMessage(r.user.Id, v)
 			bot.Send(msg)
 		}
@@ -35,10 +42,20 @@ func sendHello(chatID int64, bot *tgbotapi.BotAPI) {
 func reset(id int64, bot *tgbotapi.BotAPI) {
 	err := auth.DeleteUser(repo, id)
 	if err != nil {
+
+		logger.Error(
+			"failed to reset",
+			slog.Any("error", err),
+			slog.Int64("user_id", id),
+		)
+
 		msg := tgbotapi.NewMessage(id, fmt.Sprintf("Случилась ошибка: %v", err))
 		bot.Send(msg)
 		return
 	}
+
+	logger.Debug("successfully reset", slog.Int64("user id", id))
+
 	msg := tgbotapi.NewMessage(id, "Введите новый СНИЛС")
 	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
 	bot.Send(msg)
@@ -65,9 +82,19 @@ func refresh(id int64, bot *tgbotapi.BotAPI) {
 	err := auth.RefreshVuzes(repo, id)
 	if err != nil {
 		msg := tgbotapi.NewMessage(id, fmt.Sprintf("Случилась ошибка: %v", err))
+
+		logger.Error(
+			"failed to refresh",
+			slog.Any("error", err),
+			slog.Int64("user_id", id),
+		)
+
 		bot.Send(msg)
 		return
 	}
+
+	logger.Debug("successfully refresh", slog.Int64("user id", id))
+
 	msg := tgbotapi.NewMessage(id, "Готово")
 	bot.Send(msg)
 }

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"ratinger/internal/models/auth"
 	"ratinger/internal/repository"
@@ -35,8 +35,13 @@ type abit struct {
 	Priority             int
 }
 
-func Check(repo *repository.Repo, u *auth.User) []string {
-	napravs := retrieveNapravs(repo, u)
+func Check(repo *repository.Repo, logger *slog.Logger, u *auth.User) []string {
+	napravs, err := retrieveNapravs(repo, u)
+	if err != nil {
+		logger.Error("failed to retrieve napravs", slog.Any("error", err))
+		return nil
+	}
+
 	var wg sync.WaitGroup
 	response := make([]string, 0)
 	semaphore := make(chan struct{}, 20)
@@ -49,7 +54,7 @@ func Check(repo *repository.Repo, u *auth.User) []string {
 		wg.Add(1)
 		semaphore <- struct{}{}
 		go func() {
-			napravs[i].getList(redisClient)
+			napravs[i].getList(logger, redisClient)
 			wg.Done()
 			<-semaphore
 		}()
@@ -85,7 +90,11 @@ func Check(repo *repository.Repo, u *auth.User) []string {
 		}
 		err := repo.Db.UpdateUser(context.Background(), u.Id, args)
 		if err != nil {
-			log.Fatal(err)
+			logger.Error(
+				"failed updating user",
+				slog.Int64("user_id", u.Id),
+				slog.Any("args", args),
+			)
 		}
 	}
 
@@ -99,61 +108,76 @@ func Check(repo *repository.Repo, u *auth.User) []string {
 
 }
 
-func (n *naprav) getList(r *redis.Client) {
+func (n *naprav) getList(logger *slog.Logger, r *redis.Client) {
+	op := "spbstu.getlist"
+	logger = logger.With(
+		slog.String("op", op),
+		slog.Int("naprav_id", n.Id),
+	)
+
 	var redisKey = fmt.Sprintf("spbstu:%d", n.Id)
 	if jsonList, err := r.Get(context.Background(), redisKey).Result(); err == nil {
 		err = json.Unmarshal([]byte(jsonList), &n)
 		if err != nil {
-			log.Fatal(err)
+			logger.Error("failed to unmarshal data from redis", slog.Any("error", err))
+		} else {
+			return
 		}
-		return
 	} else if !errors.Is(err, redis.Nil) {
-		log.Fatal(err)
+		logger.Error("failed to get data from redis", slog.Any("error", err))
 	}
 
 	defer func() {
 		data, err := json.Marshal(n)
 		if err != nil {
-			log.Fatal(err)
+			logger.Error("failed to marshal data", slog.Any("error", err), slog.Any("naprav", n))
+			return
 		}
 
 		err = r.SetNX(context.Background(), redisKey, data, 10*time.Minute).Err()
 		if err != nil {
-			log.Fatal(err)
+			logger.Error("failed to set data to redis", slog.Any("error", err))
+			return
 		}
 	}()
 
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", n.Url, nil)
 	if err != nil {
-		log.Fatalf("error creating req: %v", err)
+		logger.Error("failed creating request", slog.Any("error", err))
 	}
 	req.Header.Add("Accept", `application/json,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8`)
 	req.Header.Add("User-Agent", `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_5) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11`)
 	res, err := client.Do(req)
 	if err != nil {
-		log.Fatalf("error doing req: %v", err)
+		logger.Error("failed doing request", slog.Any("error", err), slog.String("url", n.Url))
 	}
 	defer res.Body.Close()
 
+	logger = logger.With(
+		slog.Int("response code", res.StatusCode),
+	)
+
 	read, err := io.ReadAll(res.Body)
 	if err != nil {
-		log.Fatalf("error reading: %v", err)
+		logger.Error("failed reading response", slog.Any("error", err))
+		return
 	}
 
 	err = json.Unmarshal(read, &n)
 	if err != nil {
-		log.Fatalf("error unmarshalling: %v", err)
+		logger.Error("error unmarshalling response data", slog.Any("error", err))
+		return
 	}
 }
 
-func retrieveNapravs(repo *repository.Repo, u *auth.User) []naprav {
+func retrieveNapravs(repo *repository.Repo, u *auth.User) ([]naprav, error) {
 	napravs := make([]naprav, 0, len(u.Spbstu))
 
 	if u.Spbstu != nil {
 		rows, err := repo.Db.SelectQuery(context.Background(), "select * from spbstu where id = any($1)", u.Spbstu)
 		if err != nil {
-			log.Fatalf("failed getting spbstu: %v", err)
+			return nil, fmt.Errorf("failed getting user.spbstu: %v", err)
 		}
 		defer rows.Close()
 
@@ -162,13 +186,13 @@ func retrieveNapravs(repo *repository.Repo, u *auth.User) []naprav {
 			rows.Scan(&n.Id, &n.Name, &n.Payment, &n.Form, &n.EduLevel, &n.Url)
 			napravs = append(napravs, n)
 		}
-		return napravs
+		return napravs, nil
 	}
 
 	p, f, el := parseAbitConstraints(u)
 	rows, err := repo.Db.SelectQuery(context.Background(), "select * from spbstu where payment = any($1) and form = any($2) and edu_level=any($3)", p, f, el)
 	if err != nil {
-		log.Fatalf("failed getting spbstu: %v", err)
+		return nil, fmt.Errorf("failed getting user.spbstu: %v", err)
 	}
 	defer rows.Close()
 
@@ -177,7 +201,7 @@ func retrieveNapravs(repo *repository.Repo, u *auth.User) []naprav {
 		rows.Scan(&n.Id, &n.Name, &n.Payment, &n.Form, &n.EduLevel, &n.Url)
 		napravs = append(napravs, n)
 	}
-	return napravs
+	return napravs, nil
 }
 
 func parseAbitConstraints(u *auth.User) ([]string, []string, []string) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"log/slog"
 	"ratinger/internal/repository"
 )
 
@@ -53,7 +54,7 @@ func DeleteUser(repo *repository.Repo, id int64) error {
 	return nil
 }
 
-func (u *User) AddInfo(repo *repository.Repo, msg string) (response, error) {
+func (u *User) AddInfo(repo *repository.Repo, logger *slog.Logger, msg string) (response, error) {
 	var r response
 	var err error
 
@@ -67,6 +68,7 @@ func (u *User) AddInfo(repo *repository.Repo, msg string) (response, error) {
 		err = repo.Db.InsertUser(context.Background(), u.Id, u.Snils, u.AuthStatus)
 		r.Message = "Снилс успешно введен!\nТеперь выбери вид оплаты обучения, на которые ты подавал и введи /done когда закончишь"
 		r.Markup = "payment"
+		logger.Debug("user authed with snils", slog.String("snils", u.Snils), slog.Int64("user_id", u.Id))
 
 	case AUTHED_WITH_SNILS:
 		if !isValidPayment(msg) {
@@ -78,6 +80,9 @@ func (u *User) AddInfo(repo *repository.Repo, msg string) (response, error) {
 				err = repo.Db.UpdateUser(context.Background(), u.Id, args)
 				r.Message = "Сейчас выбери формы поступления. Тут также - напиши /done как закончишь"
 				r.Markup = "form"
+
+				logger.Debug("user authed with payments", slog.Any("payments", u.Payments), slog.Int64("user_id", u.Id))
+
 				return r, err
 			}
 			return r, ErrExpectedPaymentFrom
@@ -98,6 +103,9 @@ func (u *User) AddInfo(repo *repository.Repo, msg string) (response, error) {
 				err = repo.Db.UpdateUser(context.Background(), u.Id, args)
 				r.Message = "И последнее - выбери уровень образования"
 				r.Markup = "eduLevel"
+
+				logger.Debug("user authed with forms", slog.Any("forms", u.Forms), slog.Int64("user_id", u.Id))
+
 				return r, err
 			}
 			return r, ErrExpectedForm
@@ -121,6 +129,9 @@ func (u *User) AddInfo(repo *repository.Repo, msg string) (response, error) {
 			"auth_status": u.AuthStatus,
 		}
 		err = repo.Db.UpdateUser(context.Background(), u.Id, args)
+
+		logger.Debug("user authed with edu_level", slog.Any("edu_level", u.EduLevel), slog.Int64("user_id", u.Id))
+		logger.Info("user authed", slog.Int64("user_id", u.Id), slog.Any("user data", u))
 
 		r.Message = "Отлично! Теперь ты можешь пользоваться ботом!\nПросто кликай на нужный вуз и наблюдай за своими позициями\nЕсли ты поменял что-то из введенных данных - введи команду /reset\nА если бот не находит тебя в списках попробуй ввести команду /refresh\nПервый поиск может занять некоторое время, но дальше все будет быстрее"
 		r.Markup = "vuzes"

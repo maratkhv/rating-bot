@@ -2,7 +2,6 @@ package main
 
 /*
 TODO:
- - rename dir to /bot
  - add logger
  - add error handling (pretty much the same as logger)
 prolly use logger as an argument to .Check() /mb as config struct??/
@@ -14,16 +13,30 @@ and think of what to do with auth /config sounds good tho/
 
 import (
 	"context"
-	"log"
+	"log/slog"
+	"os"
 	"ratinger/internal/bot"
 	"ratinger/internal/repository"
 )
 
 func main() {
+	logger := initLogger()
+
 	repo, err := repository.New(context.Background())
 	if err != nil {
-		log.Fatal(err)
+		logger.Error("failed to connect to storage", slog.Any("error", err))
 	}
 
-	bot.Start(bot.New(), repo)
+	logger.Info("starting bot")
+
+	bot.Start(bot.New(), repo, logger)
+}
+
+func initLogger() *slog.Logger {
+	return slog.New(slog.NewJSONHandler(
+		os.Stdout,
+		&slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		},
+	))
 }

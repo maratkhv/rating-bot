@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"ratinger/internal/models/auth"
 	"ratinger/internal/repository"
@@ -43,8 +43,13 @@ type bachData struct {
 	List []abit
 }
 
-func Check(repo *repository.Repo, u *auth.User) []string {
-	napravs := retrieveNapravs(repo, u)
+func Check(repo *repository.Repo, logger *slog.Logger, u *auth.User) []string {
+	napravs, err := retrieveNapravs(repo, u)
+	if err != nil {
+		logger.Error("failed to retrieve napravs", slog.Any("error", err))
+		return nil
+	}
+
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, 20)
 	redisClient := redis.NewClient(&redis.Options{
@@ -57,7 +62,7 @@ func Check(repo *repository.Repo, u *auth.User) []string {
 		semaphore <- struct{}{}
 		go func() {
 			defer wg.Done()
-			napravs[i].getList(redisClient)
+			napravs[i].getList(logger, redisClient)
 			<-semaphore
 		}()
 	}
@@ -90,7 +95,11 @@ func Check(repo *repository.Repo, u *auth.User) []string {
 		}
 		err := repo.Db.UpdateUser(context.Background(), u.Id, args)
 		if err != nil {
-			log.Fatal(err)
+			logger.Error(
+				"failed updating user",
+				slog.Int64("user_id", u.Id),
+				slog.Any("args", args),
+			)
 		}
 	}
 
@@ -102,44 +111,63 @@ func Check(repo *repository.Repo, u *auth.User) []string {
 }
 
 // ugly parsing of html but i let it be
-func (n *naprav) getList(r *redis.Client) {
+func (n *naprav) getList(logger *slog.Logger, r *redis.Client) {
+	op := "spbu.getlist"
+	logger = logger.With(
+		slog.String("op", op),
+		slog.Int("naprav_id", n.Id),
+	)
 	var redisKey = fmt.Sprintf("spbu:%d", n.Id)
+
 	if jsonList, err := r.Get(context.Background(), redisKey).Result(); err == nil {
 		err = json.Unmarshal([]byte(jsonList), &n)
 		if err != nil {
-			log.Fatal(err)
+			logger.Error("failed to unmarshal data from redis", slog.Any("error", err))
+		} else {
+			return
 		}
-		return
 	} else if !errors.Is(err, redis.Nil) {
-		log.Fatal(err)
+		logger.Error("failed to get data from redis", slog.Any("error", err))
 	}
 
 	defer func() {
 		data, err := json.Marshal(n)
 		if err != nil {
-			log.Fatal(err)
+			logger.Error("failed to marshal data", slog.Any("error", err), slog.Any("naprav", n))
+			return
 		}
 
 		err = r.SetNX(context.Background(), redisKey, data, 10*time.Minute).Err()
 		if err != nil {
-			log.Fatal(err)
+			logger.Error("failed to set data to redis", slog.Any("error", err))
+			return
 		}
 	}()
 
 	resp, err := http.Get(n.Url)
 	if err != nil {
-		log.Fatalf("get request fail: %v", err)
+		logger.Error(
+			"failed making http request",
+			slog.String("url", n.Url),
+			slog.Any("error", err),
+		)
 	}
+
+	logger = logger.With(
+		slog.Int("response code", resp.StatusCode),
+	)
 
 	if n.EduLevel == "Бакалавриат" {
 		r, err := io.ReadAll(resp.Body)
 		if err != nil {
-			log.Fatalf("error reading response: %v", err)
+			logger.Error("failed reading response", slog.Any("error", err))
+			return
 		}
 		var data bachData
 		err = json.Unmarshal(r, &data)
 		if err != nil {
-			log.Fatalf("error unmarshalling data got by url: %s error: %v", n.Url, err)
+			logger.Error("error unmarshalling response data", slog.Any("error", err))
+			return
 		}
 		n.List = data.List
 		return
@@ -148,7 +176,7 @@ func (n *naprav) getList(r *redis.Client) {
 	// if n.eduLevel == "Магистратура" || if n.eduLevel == "Аспирантура"
 	doc, err := html.Parse(resp.Body)
 	if err != nil {
-		log.Fatalf("error parsing data (html): %v", err)
+		logger.Error("failed to parse response body (html)", slog.Any("error", err))
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -170,7 +198,7 @@ func (n *naprav) getList(r *redis.Client) {
 							case 1:
 								num, err := strconv.Atoi(td.FirstChild.Data)
 								if err != nil {
-									log.Fatalf("error  1st atoi'ing %v: %v", td.Data, err)
+									logger.Error("error atoi'ing", slog.String("supposed to be int", td.Data), slog.Any("error", err))
 								}
 								a.OrderNumber = num
 							case 2:
@@ -183,7 +211,7 @@ func (n *naprav) getList(r *redis.Client) {
 								if !strings.Contains(d, ",") {
 									num, err := strconv.Atoi(td.FirstChild.Data)
 									if err != nil {
-										log.Fatalf("error (get %v) atoi'ing %v: %v", n.Url, td.Data, err)
+										logger.Error("error atoi'ing", slog.String("supposed to be int", td.Data), slog.Any("error", err))
 									}
 									a.Priority = num
 								}
@@ -199,7 +227,7 @@ func (n *naprav) getList(r *redis.Client) {
 								}
 								num, err := strconv.Atoi(d[:len(d)-3])
 								if err != nil {
-									log.Fatalf("error 3rd atoi'ing %v: %v", td.Data, err)
+									logger.Error("error atoi'ing", slog.String("supposed to be int", td.Data), slog.Any("error", err))
 								}
 								a.Score = num
 							case 7:
@@ -230,13 +258,13 @@ func (n *naprav) getList(r *redis.Client) {
 
 }
 
-func retrieveNapravs(repo *repository.Repo, u *auth.User) []naprav {
+func retrieveNapravs(repo *repository.Repo, u *auth.User) ([]naprav, error) {
 	napravs := make([]naprav, 0, len(u.Spbu))
 
 	if u.Spbu != nil {
 		rows, err := repo.Db.SelectQuery(context.Background(), "select * from spbu where id = any($1)", u.Spbu)
 		if err != nil {
-			log.Fatalf("failed getting spbu: %v", err)
+			return nil, fmt.Errorf("failed getting user.spbu: %v", err)
 		}
 		defer rows.Close()
 
@@ -245,13 +273,13 @@ func retrieveNapravs(repo *repository.Repo, u *auth.User) []naprav {
 			rows.Scan(&n.Id, &n.Name, &n.Capacity, &n.Payment, &n.Form, &n.EduLevel, &n.Url)
 			napravs = append(napravs, n)
 		}
-		return napravs
+		return napravs, nil
 	}
 
 	p, f, el := parseAbitConstraints(u)
 	rows, err := repo.Db.SelectQuery(context.Background(), "select * from spbu where payment = any($1) and form = any($2) and edu_level=any($3)", p, f, el)
 	if err != nil {
-		log.Fatalf("failed getting spbu: %v", err)
+		return nil, fmt.Errorf("failed getting user.spbu: %v", err)
 	}
 	defer rows.Close()
 
@@ -260,7 +288,7 @@ func retrieveNapravs(repo *repository.Repo, u *auth.User) []naprav {
 		rows.Scan(&n.Id, &n.Name, &n.Capacity, &n.Payment, &n.Form, &n.EduLevel, &n.Url)
 		napravs = append(napravs, n)
 	}
-	return napravs
+	return napravs, nil
 }
 
 func parseAbitConstraints(u *auth.User) ([]string, []string, []string) {

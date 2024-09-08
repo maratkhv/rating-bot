@@ -2,11 +2,13 @@ package bot
 
 import (
 	"log"
+	"log/slog"
 	"os"
 	"ratinger/internal/models/auth"
 	"ratinger/internal/repository"
 	"ratinger/vuzes/poly"
 	"ratinger/vuzes/spbu"
+	"sync"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/joho/godotenv"
@@ -50,32 +52,34 @@ var markup = map[string]*tgbotapi.ReplyKeyboardMarkup{
 	"vuzes":    &vuzesKeyboard,
 }
 
-type request struct {
-	user *auth.User
-	job  func(*repository.Repo, *auth.User) []string
-}
-
-var repo *repository.Repo
+var (
+	repo    *repository.Repo
+	logger  *slog.Logger
+	botOnce sync.Once
+	bot     *tgbotapi.BotAPI
+)
 
 func New() *tgbotapi.BotAPI {
-	godotenv.Load()
-	token := os.Getenv("TOKEN")
-	bot, err := tgbotapi.NewBotAPI(token)
-	if err != nil {
-		log.Panic(err)
-	}
-	bot.Debug = true
-
-	// TODO: use logger
-	log.Printf("Authorized on account %s", bot.Self.UserName)
+	botOnce.Do(
+		func() {
+			godotenv.Load()
+			token := os.Getenv("TOKEN")
+			var err error
+			bot, err = tgbotapi.NewBotAPI(token)
+			if err != nil {
+				log.Panic(err)
+			}
+			bot.Debug = true
+		},
+	)
 	return bot
 }
 
-func Start(bot *tgbotapi.BotAPI, r *repository.Repo) {
-
+func Start(bot *tgbotapi.BotAPI, r *repository.Repo, lg *slog.Logger) {
+	logger = lg
 	repo = r
 
-	requestsCh := make(chan request)
+	requestsCh := make(chan workerRequest)
 
 	for range 3 {
 		go worker(bot, requestsCh)
@@ -100,7 +104,7 @@ func Start(bot *tgbotapi.BotAPI, r *repository.Repo) {
 		}
 
 		if user.AuthStatus != auth.AUTHED {
-			resp, e := user.AddInfo(repo, message)
+			resp, e := user.AddInfo(repo, logger, message)
 			if e != nil {
 				msg := tgbotapi.NewMessage(user.Id, e.Error())
 				bot.Send(msg)
@@ -120,7 +124,7 @@ func Start(bot *tgbotapi.BotAPI, r *repository.Repo) {
 			continue
 		}
 
-		var job func(*repository.Repo, *auth.User) []string
+		var job func(*repository.Repo, *slog.Logger, *auth.User) []string
 		switch update.Message.Text {
 		case "СПБПУ":
 			job = poly.Check
@@ -131,7 +135,7 @@ func Start(bot *tgbotapi.BotAPI, r *repository.Repo) {
 			continue
 		}
 
-		requestsCh <- request{
+		requestsCh <- workerRequest{
 			user: user,
 			job:  job,
 		}
