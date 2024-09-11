@@ -1,9 +1,9 @@
 package bot
 
 import (
-	"log"
 	"log/slog"
 	"os"
+	"ratinger/internal/bot/logger"
 	"ratinger/internal/models/auth"
 	"ratinger/internal/repository"
 	"ratinger/vuzes/poly"
@@ -54,12 +54,12 @@ var markup = map[string]*tgbotapi.ReplyKeyboardMarkup{
 
 var (
 	repo    *repository.Repo
-	logger  *slog.Logger
+	log     *slog.Logger
 	botOnce sync.Once
 	bot     *tgbotapi.BotAPI
 )
 
-func New() *tgbotapi.BotAPI {
+func New(log *slog.Logger) *tgbotapi.BotAPI {
 	botOnce.Do(
 		func() {
 			godotenv.Load()
@@ -67,7 +67,10 @@ func New() *tgbotapi.BotAPI {
 			var err error
 			bot, err = tgbotapi.NewBotAPI(token)
 			if err != nil {
-				log.Panic(err)
+				panic(err)
+			}
+			if err := tgbotapi.SetLogger(logger.New(log)); err != nil {
+				panic(err)
 			}
 			bot.Debug = true
 		},
@@ -76,7 +79,7 @@ func New() *tgbotapi.BotAPI {
 }
 
 func Start(bot *tgbotapi.BotAPI, r *repository.Repo, lg *slog.Logger) {
-	logger = lg
+	log = lg
 	repo = r
 
 	requestsCh := make(chan workerRequest)
@@ -104,7 +107,7 @@ func Start(bot *tgbotapi.BotAPI, r *repository.Repo, lg *slog.Logger) {
 		}
 
 		if user.AuthStatus != auth.AUTHED {
-			resp, e := user.AddInfo(repo, logger, message)
+			resp, e := user.AddInfo(repo, log, message)
 			if e != nil {
 				msg := tgbotapi.NewMessage(user.Id, e.Error())
 				bot.Send(msg)

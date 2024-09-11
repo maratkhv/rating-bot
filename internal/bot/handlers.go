@@ -23,7 +23,7 @@ func worker(bot *tgbotapi.BotAPI, reqCH chan workerRequest) {
 			del = tgbotapi.NewDeleteMessage(r.user.Id, message.MessageID)
 		}
 
-		for _, v := range r.job(repo, logger, r.user) {
+		for _, v := range r.job(repo, log, r.user) {
 			msg := tgbotapi.NewMessage(r.user.Id, v)
 			bot.Send(msg)
 		}
@@ -43,7 +43,7 @@ func reset(id int64, bot *tgbotapi.BotAPI) {
 	err := auth.DeleteUser(repo, id)
 	if err != nil {
 
-		logger.Error(
+		log.Error(
 			"failed to reset",
 			slog.Any("error", err),
 			slog.Int64("user_id", id),
@@ -54,7 +54,7 @@ func reset(id int64, bot *tgbotapi.BotAPI) {
 		return
 	}
 
-	logger.Debug("successfully reset", slog.Int64("user id", id))
+	log.Debug("successfully reset", slog.Int64("user id", id))
 
 	msg := tgbotapi.NewMessage(id, "Введите новый СНИЛС")
 	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
@@ -83,7 +83,7 @@ func refresh(id int64, bot *tgbotapi.BotAPI) {
 	if err != nil {
 		msg := tgbotapi.NewMessage(id, fmt.Sprintf("Случилась ошибка: %v", err))
 
-		logger.Error(
+		log.Error(
 			"failed to refresh",
 			slog.Any("error", err),
 			slog.Int64("user_id", id),
@@ -93,7 +93,7 @@ func refresh(id int64, bot *tgbotapi.BotAPI) {
 		return
 	}
 
-	logger.Debug("successfully refresh", slog.Int64("user id", id))
+	log.Debug("successfully refresh", slog.Int64("user id", id))
 
 	msg := tgbotapi.NewMessage(id, "Готово")
 	bot.Send(msg)

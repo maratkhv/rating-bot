@@ -29,7 +29,7 @@ func main() {
 
 	logger.Info("starting bot")
 
-	bot.Start(bot.New(), repo, logger)
+	bot.Start(bot.New(logger), repo, logger)
 }
 
 func initLogger() *slog.Logger {
