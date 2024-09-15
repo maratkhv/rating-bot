@@ -1,16 +1,5 @@
 package main
 
-/*
-TODO:
- - add logger
- - add error handling (pretty much the same as logger)
-prolly use logger as an argument to .Check() /mb as config struct??/
-and think of what to do with auth /config sounds good tho/
- - use methods for repository  instead of repo.Db methods which use them unexported so you chache and insert to db at once
- - write tests
- - use github actions for deploy and gh secrets for bot token
-*/
-
 import (
 	"context"
 	"log/slog"
